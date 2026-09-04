@@ -252,7 +252,7 @@
 
       <div class="tab-nav">
         <button class="tab-btn active" data-tab="breakup" onclick="switchInnerTab('BB','breakup')">Sales / Team Leader breakup</button>
-        <button class="tab-btn" data-tab="month" onclick="switchInnerTab('BB','month')">Month-wise (FY)</button>
+        <button class="tab-btn" data-tab="month" onclick="switchInnerTab('BB','month')">TL / Sales Breakup</button>
         <button class="tab-btn" data-tab="agent" onclick="switchInnerTab('BB','agent')">Agent Update</button>
       </div>
 
@@ -291,20 +291,17 @@
 
       <div id="inner-BB-month" class="tab-panel">
         <div class="panel">
-          <h2>Month-wise breakup (Financial Year)</h2>
+          <h2>Team Leader / Sales breakup (by month)</h2>
           <p class="note">
-            A lead generated in one FY can close in a later FY &mdash; "Leads Generated" counts by the lead's
-            original generation month; "Leads Closed" counts by the month the deal actually closed. Financial
-            Year runs April to March.
+            Select a month to see each Team Leader's total leads and closed leads for that month, with their
+            Sales agents broken out underneath. Months follow the lead's generation date &mdash; except a lead
+            generated before April 2026 with a close month is counted under its close month instead.
           </p>
           <div class="fy-select-row">
-            <label for="fy-select-BB">Financial Year</label>
-            <select id="fy-select-BB" onchange="renderMonthTable('BB')"></select>
+            <label for="month-select-BB">Month</label>
+            <select id="month-select-BB" onchange="renderTlSalesByMonth('BB')"></select>
           </div>
-          <table id="month-table-BB">
-            <thead><tr><th>Month</th><th class="num">Leads generated</th><th class="num">Leads closed</th></tr></thead>
-            <tbody></tbody>
-          </table>
+          <div id="tl-sales-by-month-BB"></div>
         </div>
       </div>
 
@@ -366,7 +363,7 @@
 
       <div class="tab-nav">
         <button class="tab-btn active" data-tab="breakup" onclick="switchInnerTab('CATV','breakup')">Sales / Team Leader breakup</button>
-        <button class="tab-btn" data-tab="month" onclick="switchInnerTab('CATV','month')">Month-wise (FY)</button>
+        <button class="tab-btn" data-tab="month" onclick="switchInnerTab('CATV','month')">TL / Sales Breakup</button>
         <button class="tab-btn" data-tab="agent" onclick="switchInnerTab('CATV','agent')">Agent Update</button>
       </div>
 
@@ -405,19 +402,18 @@
 
       <div id="inner-CATV-month" class="tab-panel">
         <div class="panel">
-          <h2>Month-wise breakup (Financial Year)</h2>
+          <h2>Team Leader / Sales breakup (by month)</h2>
           <p class="note">
-            This sheet has no separate close-date column, so "Leads Closed" is approximated using the lead's
-            generation month, counted only when the status is "Lead Close". Financial Year runs April to March.
+            Select a month to see each Team Leader's total leads and closed leads for that month, with their
+            Sales agents broken out underneath. Months follow the lead's generation date &mdash; except a lead
+            generated before April 2026 with a close month is counted under its close month instead. This
+            sheet has no separate close-date column, so "closed" here means status = "Lead Close".
           </p>
           <div class="fy-select-row">
-            <label for="fy-select-CATV">Financial Year</label>
-            <select id="fy-select-CATV" onchange="renderMonthTable('CATV')"></select>
+            <label for="month-select-CATV">Month</label>
+            <select id="month-select-CATV" onchange="renderTlSalesByMonth('CATV')"></select>
           </div>
-          <table id="month-table-CATV">
-            <thead><tr><th>Month</th><th class="num">Leads generated</th><th class="num">Leads closed (approx.)</th></tr></thead>
-            <tbody></tbody>
-          </table>
+          <div id="tl-sales-by-month-CATV"></div>
         </div>
       </div>
 
@@ -751,8 +747,14 @@ function renderSheet(type) {
 
   refreshSalesTeamLeaderOptions(type);
   renderBreakupTables(type, leads);
-  populateFySelect(type, leads);
-  renderMonthTable(type);
+
+  if (type === 'ILL') {
+    populateFySelect(type, leads);
+    renderMonthTable(type);
+  } else {
+    populateMonthSelect(type, leads);
+    renderTlSalesByMonth(type);
+  }
 }
 
 function fmtINR(n) {
@@ -1009,6 +1011,91 @@ function renderMonthTable(type) {
       '<td class="num">' + (closeCounts[m] || 0) + '</td>';
     tbody.appendChild(tr);
   });
+}
+
+// =============================================================================
+// TEAM LEADER / SALES BREAKUP BY MONTH (BB, CATV) — replaces the old
+// simple month-wise trend table for these two sheets. Uses the same
+// "effective generation month" redirect as everything else (a lead
+// generated before April 2026 with a close month counts under its
+// close month instead).
+// =============================================================================
+function populateMonthSelect(type, leads) {
+  var select = document.getElementById('month-select-' + type);
+  var monthSet = {};
+  leads.forEach(function (l) {
+    var m = getEffectiveGenMonth(l);
+    if (m) monthSet[m] = true;
+  });
+  var monthList = Object.keys(monthSet).sort(); // "YYYY-MM" sorts correctly as plain strings
+  var previousValue = select.value;
+  select.innerHTML = monthList.map(function (m) {
+    var monthName = MONTH_NUM_TO_NAME[m.split('-')[1]] || m;
+    var yearLabel = m.split('-')[0];
+    return '<option value="' + m + '">' + monthName + ' ' + yearLabel + '</option>';
+  }).join('');
+  if (previousValue && monthList.indexOf(previousValue) !== -1) {
+    select.value = previousValue;
+  } else if (monthList.length > 0) {
+    select.value = monthList[monthList.length - 1]; // default to the most recent month
+  }
+}
+
+function renderTlSalesByMonth(type) {
+  var select = document.getElementById('month-select-' + type);
+  var selectedMonth = select.value;
+  var leads = LEADS_BY_TYPE[type] || [];
+  var container = document.getElementById('tl-sales-by-month-' + type);
+
+  var monthLeads = leads.filter(function (l) { return getEffectiveGenMonth(l) === selectedMonth; });
+
+  if (!selectedMonth || monthLeads.length === 0) {
+    container.innerHTML = '<p class="empty-note">No data for this month</p>';
+    return;
+  }
+
+  // Group: TL name -> { total, closed, salesGroups: { salesName -> {total, closed} } }
+  var tlGroups = {};
+  monthLeads.forEach(function (l) {
+    var isClosed = isClosedStatus(l.status_raw, type);
+    (l.team_leader_names || []).forEach(function (tlName) {
+      tlGroups[tlName] = tlGroups[tlName] || { total: 0, closed: 0, salesGroups: {} };
+      tlGroups[tlName].total++;
+      if (isClosed) tlGroups[tlName].closed++;
+
+      (l.sales_names || []).forEach(function (salesName) {
+        var sg = tlGroups[tlName].salesGroups;
+        sg[salesName] = sg[salesName] || { total: 0, closed: 0 };
+        sg[salesName].total++;
+        if (isClosed) sg[salesName].closed++;
+      });
+    });
+  });
+
+  var tlNames = Object.keys(tlGroups).sort(function (a, b) { return tlGroups[b].total - tlGroups[a].total; });
+
+  var html = '';
+  tlNames.forEach(function (tlName) {
+    var tl = tlGroups[tlName];
+    var salesNames = Object.keys(tl.salesGroups).sort(function (a, b) { return tl.salesGroups[b].total - tl.salesGroups[a].total; });
+
+    html += '<div style="border:1px solid var(--border); border-radius:10px; margin-bottom:14px; overflow:hidden;">';
+    html += '<div style="background:#eef2f6; padding:10px 16px; display:flex; justify-content:space-between; align-items:center;">';
+    html += '<strong style="color:var(--navy);">' + tlName + '</strong>';
+    html += '<span style="font-size:12px; color:var(--grey);">Total leads: <strong>' + tl.total + '</strong> &nbsp;&middot;&nbsp; Closed: <strong>' + tl.closed + '</strong></span>';
+    html += '</div>';
+    html += '<table style="width:100%; font-size:13px;"><tbody>';
+    salesNames.forEach(function (salesName) {
+      var s = tl.salesGroups[salesName];
+      html += '<tr><td style="padding:6px 16px 6px 32px; border-bottom:1px solid #f0f2f5;">' + salesName + '</td>' +
+              '<td class="num" style="padding:6px 16px; border-bottom:1px solid #f0f2f5; width:120px;">' + s.total + ' leads</td>' +
+              '<td class="num" style="padding:6px 16px; border-bottom:1px solid #f0f2f5; width:120px;">' + s.closed + ' closed</td></tr>';
+    });
+    html += '</tbody></table>';
+    html += '</div>';
+  });
+
+  container.innerHTML = html;
 }
 
 
