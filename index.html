@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <title>BB / CATV / ILL Lead Management Portal</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root {
     --navy: #0f2942;
@@ -216,16 +217,16 @@
   </header>
 
   <div class="sheet-nav">
-    <button class="sheet-nav-btn active" data-sheet="BB" onclick="switchSheet('BB')">Broadband (BB)</button>
+    <button class="sheet-nav-btn active" data-sheet="COMBINED" onclick="switchSheet('COMBINED')">Combined Report</button>
+    <button class="sheet-nav-btn" data-sheet="BB" onclick="switchSheet('BB')">Broadband (BB)</button>
     <button class="sheet-nav-btn" data-sheet="CATV" onclick="switchSheet('CATV')">CATV</button>
     <button class="sheet-nav-btn" data-sheet="ILL" onclick="switchSheet('ILL')">ILL / Corporate BB</button>
-    <button class="sheet-nav-btn" data-sheet="COMBINED" onclick="switchSheet('COMBINED')">Combined Report</button>
   </div>
 
   <main>
     <div id="loading-banner" class="loading-banner" style="display:none;">Loading data&hellip;</div>
 
-    <div id="sheet-panel-BB" class="sheet-panel active">
+    <div id="sheet-panel-BB" class="sheet-panel">
       <div class="kpi-row">
         <div class="kpi-card">
           <div class="label">Total leads</div>
@@ -308,6 +309,22 @@
             <button class="primary-btn" onclick="submitNewLead('BB')">Save new lead</button>
             <div id="add-lead-status-BB" class="agent-status-msg" style="display:none; margin-top:12px;"></div>
           </div>
+        </div>
+        <div class="panel" style="margin-top:20px;">
+          <h2>Bulk upload leads</h2>
+          <p class="note">
+            Download the template, fill it in, then upload the .xlsx file. Customer Name, Mobile Number,
+            Lead Status, Lead Source, and Type of Connection are required for every row &mdash; rows missing
+            any of these are rejected. Rows with a mobile number already in the sheet are still uploaded,
+            but flagged in the summary.
+          </p>
+          <button class="modal-btn-secondary" onclick="downloadBulkTemplate('BB')">Download template</button>
+          <div style="margin-top:12px;">
+            <input type="file" id="bulk-upload-input-BB" accept=".xlsx" style="display:none;" onchange="handleBulkUpload('BB', this)">
+            <button class="primary-btn" onclick="document.getElementById('bulk-upload-input-BB').click()">Upload .xlsx file</button>
+          </div>
+          <div id="bulk-upload-status-BB" class="agent-status-msg" style="display:none; margin-top:12px;"></div>
+          <div id="bulk-upload-summary-BB" style="margin-top:12px;"></div>
         </div>
         <div class="panel" style="margin-top:20px;">
           <h2>Agent update</h2>
@@ -399,6 +416,22 @@
             <button class="primary-btn" onclick="submitNewLead('CATV')">Save new lead</button>
             <div id="add-lead-status-CATV" class="agent-status-msg" style="display:none; margin-top:12px;"></div>
           </div>
+        </div>
+        <div class="panel" style="margin-top:20px;">
+          <h2>Bulk upload leads</h2>
+          <p class="note">
+            Download the template, fill it in, then upload the .xlsx file. Customer Name, Mobile Number,
+            Lead Status, Lead Source, and Type of Connection are required for every row &mdash; rows missing
+            any of these are rejected. Rows with a mobile number already in the sheet are still uploaded,
+            but flagged in the summary.
+          </p>
+          <button class="modal-btn-secondary" onclick="downloadBulkTemplate('CATV')">Download template</button>
+          <div style="margin-top:12px;">
+            <input type="file" id="bulk-upload-input-CATV" accept=".xlsx" style="display:none;" onchange="handleBulkUpload('CATV', this)">
+            <button class="primary-btn" onclick="document.getElementById('bulk-upload-input-CATV').click()">Upload .xlsx file</button>
+          </div>
+          <div id="bulk-upload-status-CATV" class="agent-status-msg" style="display:none; margin-top:12px;"></div>
+          <div id="bulk-upload-summary-CATV" style="margin-top:12px;"></div>
         </div>
         <div class="panel" style="margin-top:20px;">
           <h2>Agent update</h2>
@@ -500,7 +533,7 @@
       </div>
     </div>
 
-    <div id="sheet-panel-COMBINED" class="sheet-panel">
+    <div id="sheet-panel-COMBINED" class="sheet-panel active">
       <div class="panel">
         <h2>Combined report</h2>
         <p class="note">
@@ -526,7 +559,7 @@
 // CONFIG
 // =============================================================================
 // Paste your Google Apps Script Web App URL here (see Code.gs install steps).
-var API_BASE = "https://script.google.com/macros/s/AKfycbyfpJeBod3v3iRNZptoWpEVGd9KT856mYdH6oxXfiPZoe-cBj9g0uxW4ZN98PJ_vhltpQ/exec";
+var API_BASE = "https://script.google.com/macros/s/AKfycbwXa4psv_yBvA6P5ZuaplwFgVoKI9AqlwgrwD2Eyi2KSZPqDYFTe1DA7vWTKpRvws_Zfw/exec";
 
 var DASHBOARD_PASSWORD = "GTPLKCBPL";
 
@@ -586,7 +619,7 @@ function logout() {
 function showDashboard() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('dashboard-screen').style.display = 'block';
-  switchSheet('BB');
+  switchSheet('COMBINED');
 }
 
 // =============================================================================
@@ -1455,6 +1488,147 @@ async function saveNewLead(type, fields, statusEl) {
     statusEl.className = 'agent-status-msg error'; statusEl.textContent = 'Could not reach the server. Please try again.';
     console.error(err);
   }
+}
+
+// =============================================================================
+// BULK UPLOAD — template download + .xlsx parse/validate/upload for
+// BB and CATV. Mandatory fields match FIELD_DEFS' required:true entries.
+// Duplicate mobile numbers are flagged in the summary but still uploaded.
+// =============================================================================
+function downloadBulkTemplate(type) {
+  var fields = FIELD_DEFS[type].filter(function (f) { return !f.skipOnAdd; });
+  var headers = fields.map(function (f) { return f.label; });
+  var ws = XLSX.utils.aoa_to_sheet([headers]);
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Template');
+  XLSX.writeFile(wb, type + '_bulk_upload_template.xlsx');
+}
+
+// Maps a template column label back to its FIELD_DEFS entry, for the
+// given sheet type.
+function getFieldByLabel(type, label) {
+  return FIELD_DEFS[type].filter(function (f) { return !f.skipOnAdd; })
+    .filter(function (f) { return f.label.trim().toLowerCase() === String(label || '').trim().toLowerCase(); })[0];
+}
+
+async function handleBulkUpload(type, inputEl) {
+  var file = inputEl.files && inputEl.files[0];
+  var statusEl = document.getElementById('bulk-upload-status-' + type);
+  var summaryEl = document.getElementById('bulk-upload-summary-' + type);
+  summaryEl.innerHTML = '';
+  if (!file) return;
+
+  statusEl.className = 'agent-status-msg info';
+  statusEl.textContent = 'Reading file\u2026';
+  statusEl.style.display = 'block';
+
+  try {
+    var buffer = await file.arrayBuffer();
+    var wb = XLSX.read(buffer, { type: 'array' });
+    var firstSheetName = wb.SheetNames[0];
+    var rows = XLSX.utils.sheet_to_json(wb.Sheets[firstSheetName], { defval: '' });
+
+    if (rows.length === 0) {
+      statusEl.className = 'agent-status-msg error';
+      statusEl.textContent = 'The file has no data rows.';
+      inputEl.value = '';
+      return;
+    }
+
+    var mandatoryFields = FIELD_DEFS[type].filter(function (f) { return !f.skipOnAdd && f.required; });
+    var results = { success: [], rejected: [], duplicates: [] };
+
+    for (var i = 0; i < rows.length; i++) {
+      var rowNum = i + 2; // +2: template row 1 is the header, data starts at row 2
+      var rawRow = rows[i];
+      var fields = {};
+      var missing = [];
+
+      Object.keys(rawRow).forEach(function (colLabel) {
+        var field = getFieldByLabel(type, colLabel);
+        if (field) {
+          var val = String(rawRow[colLabel] || '').trim();
+          if (val) fields[field.header] = val;
+        }
+      });
+
+      mandatoryFields.forEach(function (f) {
+        if (!fields[f.header]) missing.push(f.label);
+      });
+
+      if (missing.length > 0) {
+        results.rejected.push({ row: rowNum, reason: 'Missing: ' + missing.join(', ') });
+        continue;
+      }
+
+      var mobileField = FIELD_DEFS[type].filter(function (f) { return f.type === 'mobile'; })[0];
+      var mobileValue = mobileField ? fields[mobileField.header] : null;
+      var mobileError = mobileValue ? validateMobileNumber(mobileValue) : 'Mobile number is required.';
+      if (mobileError) {
+        results.rejected.push({ row: rowNum, reason: mobileError });
+        continue;
+      }
+
+      statusEl.textContent = 'Uploading row ' + (i + 1) + ' of ' + rows.length + '\u2026';
+
+      var isDuplicate = false;
+      try {
+        var dupCheck = await apiPost({ type: type, action: 'check_duplicate_mobile', mobile: mobileValue });
+        isDuplicate = !!(dupCheck.success && dupCheck.is_duplicate);
+      } catch (e) {
+        console.error('Duplicate check failed for row', rowNum, e);
+      }
+
+      try {
+        var addResult = await apiPost({ type: type, action: 'add_lead', fields: fields });
+        if (addResult.success) {
+          results.success.push({ row: rowNum, sheetRow: addResult.new_row_number });
+          if (isDuplicate) results.duplicates.push(rowNum);
+        } else {
+          results.rejected.push({ row: rowNum, reason: addResult.error || 'Server rejected this row.' });
+        }
+      } catch (e) {
+        results.rejected.push({ row: rowNum, reason: 'Could not reach the server.' });
+      }
+    }
+
+    statusEl.className = 'agent-status-msg success';
+    statusEl.textContent = 'Upload complete.';
+    renderBulkUploadSummary(type, results, rows.length);
+  } catch (err) {
+    statusEl.className = 'agent-status-msg error';
+    statusEl.textContent = 'Could not read the file. Make sure it is a valid .xlsx file.';
+    console.error(err);
+  } finally {
+    inputEl.value = '';
+  }
+}
+
+function renderBulkUploadSummary(type, results, totalRows) {
+  var summaryEl = document.getElementById('bulk-upload-summary-' + type);
+  var html = '<div class="agent-full-details"><table style="width:100%;font-size:13px;border-collapse:collapse;">';
+  html += '<tr><td style="font-weight:600;color:var(--grey);padding-right:16px;">Total rows in file</td><td>' + totalRows + '</td></tr>';
+  html += '<tr><td style="font-weight:600;color:var(--teal);padding-right:16px;">Uploaded successfully</td><td>' + results.success.length + '</td></tr>';
+  html += '<tr><td style="font-weight:600;color:var(--red);padding-right:16px;">Rejected (missing/invalid fields)</td><td>' + results.rejected.length + '</td></tr>';
+  html += '<tr><td style="font-weight:600;color:var(--amber);padding-right:16px;">Uploaded but duplicate mobile</td><td>' + results.duplicates.length + '</td></tr>';
+  html += '</table></div>';
+
+  if (results.rejected.length > 0) {
+    html += '<div style="margin-top:12px;font-size:13px;"><strong>Rejected rows:</strong><ul style="margin:6px 0 0; padding-left:20px;">';
+    results.rejected.forEach(function (r) {
+      html += '<li>Row ' + r.row + ': ' + r.reason + '</li>';
+    });
+    html += '</ul></div>';
+  }
+  if (results.duplicates.length > 0) {
+    html += '<div style="margin-top:12px;font-size:13px;"><strong>Duplicate mobile numbers (still uploaded):</strong><ul style="margin:6px 0 0; padding-left:20px;">';
+    results.duplicates.forEach(function (rowNum) {
+      html += '<li>Row ' + rowNum + '</li>';
+    });
+    html += '</ul></div>';
+  }
+
+  summaryEl.innerHTML = html;
 }
 
 function showDuplicateMobileModal(onContinue) {
