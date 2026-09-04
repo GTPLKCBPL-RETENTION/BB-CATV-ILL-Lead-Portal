@@ -126,12 +126,6 @@
 
   .full-width { grid-column: 1 / -1; }
 
-  #leads-table-wrap-bb, #leads-table-wrap-catv, #leads-table-wrap-ill {
-    overflow-x: auto; max-height: 480px; overflow-y: auto;
-  }
-  .leads-table-inner { min-width: 900px; }
-  .leads-table-inner thead th { position: sticky; top: 0; background: var(--card); }
-
   .empty-note { color: var(--grey); font-size: 13px; padding: 20px 0; text-align: center; }
   .loading-banner {
     background: #fff8e6; border: 1px solid #f0d896; color: #8a6a1a;
@@ -239,7 +233,6 @@
       <div class="tab-nav">
         <button class="tab-btn active" data-tab="breakup" onclick="switchInnerTab('BB','breakup')">Sales / Team Leader breakup</button>
         <button class="tab-btn" data-tab="month" onclick="switchInnerTab('BB','month')">Month-wise (FY)</button>
-        <button class="tab-btn" data-tab="details" onclick="switchInnerTab('BB','details')">Lead Details</button>
         <button class="tab-btn" data-tab="agent" onclick="switchInnerTab('BB','agent')">Agent Update</button>
       </div>
 
@@ -295,33 +288,6 @@
         </div>
       </div>
 
-      <div id="inner-BB-details" class="tab-panel">
-        <div class="panel">
-          <h2>Lead details</h2>
-          <div class="agent-edit-row" style="margin-bottom:8px;">
-            <div class="filter-group">
-              <label>Sales</label>
-              <select id="d-filter-sales-BB"><option value="">All</option></select>
-            </div>
-            <div class="filter-group">
-              <label>Status</label>
-              <select id="d-filter-status-BB"><option value="">All</option></select>
-            </div>
-          </div>
-          <div id="leads-table-wrap-bb">
-            <table class="leads-table-inner" id="leads-table-BB">
-              <thead>
-                <tr>
-                  <th>Gen. date</th><th>Customer</th><th>Mobile</th><th>Connection</th>
-                  <th>Sales</th><th>Team Leader</th><th>Status</th><th>Closer date</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
       <div id="inner-BB-agent" class="tab-panel">
         <div class="panel">
           <h2>Add new lead</h2>
@@ -359,7 +325,6 @@
       <div class="tab-nav">
         <button class="tab-btn active" data-tab="breakup" onclick="switchInnerTab('CATV','breakup')">Sales / Team Leader breakup</button>
         <button class="tab-btn" data-tab="month" onclick="switchInnerTab('CATV','month')">Month-wise (FY)</button>
-        <button class="tab-btn" data-tab="details" onclick="switchInnerTab('CATV','details')">Lead Details</button>
         <button class="tab-btn" data-tab="agent" onclick="switchInnerTab('CATV','agent')">Agent Update</button>
       </div>
 
@@ -414,33 +379,6 @@
         </div>
       </div>
 
-      <div id="inner-CATV-details" class="tab-panel">
-        <div class="panel">
-          <h2>Lead details</h2>
-          <div class="agent-edit-row" style="margin-bottom:8px;">
-            <div class="filter-group">
-              <label>Sales</label>
-              <select id="d-filter-sales-CATV"><option value="">All</option></select>
-            </div>
-            <div class="filter-group">
-              <label>Status</label>
-              <select id="d-filter-status-CATV"><option value="">All</option></select>
-            </div>
-          </div>
-          <div id="leads-table-wrap-catv">
-            <table class="leads-table-inner" id="leads-table-CATV">
-              <thead>
-                <tr>
-                  <th>Gen. date</th><th>Customer</th><th>Mobile</th><th>Connection</th>
-                  <th>Sales</th><th>Team Leader</th><th>Status</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
       <div id="inner-CATV-agent" class="tab-panel">
         <div class="panel">
           <h2>Add new lead</h2>
@@ -478,7 +416,6 @@
       <div class="tab-nav">
         <button class="tab-btn active" data-tab="breakup" onclick="switchInnerTab('ILL','breakup')">RM-wise breakup</button>
         <button class="tab-btn" data-tab="month" onclick="switchInnerTab('ILL','month')">Month-wise (FY)</button>
-        <button class="tab-btn" data-tab="details" onclick="switchInnerTab('ILL','details')">Lead Details</button>
         <button class="tab-btn" data-tab="agent" onclick="switchInnerTab('ILL','agent')">Agent Update</button>
       </div>
 
@@ -523,33 +460,6 @@
             <thead><tr><th>Month</th><th class="num">Leads generated</th><th class="num">Leads closed</th></tr></thead>
             <tbody></tbody>
           </table>
-        </div>
-      </div>
-
-      <div id="inner-ILL-details" class="tab-panel">
-        <div class="panel">
-          <h2>Lead details</h2>
-          <div class="agent-edit-row" style="margin-bottom:8px;">
-            <div class="filter-group">
-              <label>RM</label>
-              <select id="d-filter-sales-ILL"><option value="">All</option></select>
-            </div>
-            <div class="filter-group">
-              <label>Status</label>
-              <select id="d-filter-status-ILL"><option value="">All</option></select>
-            </div>
-          </div>
-          <div id="leads-table-wrap-ill">
-            <table class="leads-table-inner" id="leads-table-ILL">
-              <thead>
-                <tr>
-                  <th>Lead date</th><th>Company</th><th>Mobile</th><th>Connection</th>
-                  <th>RM</th><th>Status</th><th>Close month</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
-          </div>
         </div>
       </div>
 
@@ -725,8 +635,6 @@ function renderSheet(type) {
   renderBreakupTables(type, leads);
   populateFySelect(type, leads);
   renderMonthTable(type);
-  populateDetailsFilters(type, leads);
-  renderLeadsTable(type, leads);
 }
 
 function statusClass(cat) {
@@ -905,94 +813,6 @@ function renderMonthTable(type) {
   });
 }
 
-// =============================================================================
-// RENDER: LEAD DETAILS TABLE (with Sales/RM + Status filters)
-// =============================================================================
-function getPersonField(type) {
-  if (type === 'ILL') return 'rm_names';
-  return 'sales_names';
-}
-
-function populateDetailsFilters(type, leads) {
-  var personField = getPersonField(type);
-  var personSel = document.getElementById('d-filter-sales-' + type);
-  var personSet = {};
-  leads.forEach(function (l) { (l[personField] || []).forEach(function (n) { personSet[n] = true; }); });
-  var personList = Object.keys(personSet).sort();
-  personSel.innerHTML = '<option value="">All</option>' +
-    personList.map(function (n) { return '<option value="' + n + '">' + n + '</option>'; }).join('');
-  personSel.onchange = function () { renderLeadsTable(type, LEADS_BY_TYPE[type]); };
-
-  var statusSel = document.getElementById('d-filter-status-' + type);
-  var seenLower = {};
-  var statusList = [];
-  leads.forEach(function (l) {
-    var s = l.status_raw;
-    if (!s) return;
-    var key = s.trim().toLowerCase();
-    if (!seenLower[key]) { seenLower[key] = true; statusList.push(s); }
-  });
-  statusList.sort();
-  statusSel.innerHTML = '<option value="">All</option>' +
-    statusList.map(function (s) { return '<option value="' + s + '">' + s + '</option>'; }).join('');
-  statusSel.onchange = function () { renderLeadsTable(type, LEADS_BY_TYPE[type]); };
-}
-
-function renderLeadsTable(type, leads) {
-  var personField = getPersonField(type);
-  var personFilter = document.getElementById('d-filter-sales-' + type).value;
-  var statusFilter = document.getElementById('d-filter-status-' + type).value;
-
-  var visible = leads.filter(function (l) {
-    if (personFilter && (l[personField] || []).indexOf(personFilter) === -1) return false;
-    if (statusFilter && String(l.status_raw || '').trim().toLowerCase() !== statusFilter.trim().toLowerCase()) return false;
-    return true;
-  });
-
-  var tbody = document.querySelector('#leads-table-' + type + ' tbody');
-  tbody.innerHTML = '';
-  var limited = visible.slice(0, 300);
-
-  if (limited.length === 0) {
-    var colCount = type === 'ILL' ? 7 : (type === 'CATV' ? 7 : 8);
-    tbody.innerHTML = '<tr><td colspan="' + colCount + '" class="empty-note">No leads found</td></tr>';
-    return;
-  }
-
-  limited.forEach(function (l) {
-    var tr = document.createElement('tr');
-    if (type === 'BB') {
-      tr.innerHTML =
-        '<td>' + (l.lead_gen_date || '') + '</td>' +
-        '<td>' + (l.customer_name || '') + '</td>' +
-        '<td>' + (l.mobile || '') + '</td>' +
-        '<td>' + (l.connection_type || '') + '</td>' +
-        '<td>' + ((l.sales_names || []).join(', ')) + '</td>' +
-        '<td>' + ((l.team_leader_names || []).join(', ')) + '</td>' +
-        '<td><span class="status-pill ' + statusClass(l.status_raw) + '">' + l.status_raw + '</span></td>' +
-        '<td>' + (l.close_month || '') + '</td>';
-    } else if (type === 'CATV') {
-      tr.innerHTML =
-        '<td>' + (l.lead_gen_date || '') + '</td>' +
-        '<td>' + (l.customer_name || '') + '</td>' +
-        '<td>' + (l.mobile || '') + '</td>' +
-        '<td>' + (l.connection_type || '') + '</td>' +
-        '<td>' + ((l.sales_names || []).join(', ')) + '</td>' +
-        '<td>' + ((l.team_leader_names || []).join(', ')) + '</td>' +
-        '<td><span class="status-pill ' + statusClass(l.status_raw) + '">' + l.status_raw + '</span></td>';
-    } else { // ILL
-      tr.innerHTML =
-        '<td>' + (l.lead_gen_date || '') + '</td>' +
-        '<td>' + (l.company || '') + '</td>' +
-        '<td>' + (l.mobile || '') + '</td>' +
-        '<td>' + (l.connection_type || '') + '</td>' +
-        '<td>' + ((l.rm_names || []).join(', ')) + '</td>' +
-        '<td><span class="status-pill ' + statusClass(l.status_raw) + '">' + l.status_raw + '</span></td>' +
-        '<td>' + (l.close_month || '') + '</td>';
-    }
-    tbody.appendChild(tr);
-  });
-}
 
 // =============================================================================
 // FIELD DEFINITIONS PER SHEET TYPE — drive both "Add New Lead" and
@@ -1020,8 +840,8 @@ var FIELD_DEFS = {
     { label: "Followup Date", header: "FOLLOWUP DATE (mm/dd/yyyy)", type: "date", skipOnAdd: true },
     { label: "Agent Remarks", header: "AGENT REMARKS", type: "textarea" },
     { label: "Sales Remarks", header: "SALES REMARKS", type: "textarea", skipOnAdd: true },
-    { label: "Sales", header: "SALES", type: "select", required: true, options: [] },
-    { label: "Team Leader", header: "TEAM LEADER", type: "select", required: true, options: [] }
+    { label: "Sales", header: "SALES", type: "select", options: [], skipOnAdd: true },
+    { label: "Team Leader", header: "TEAM LEADER", type: "select", options: [], skipOnAdd: true }
   ],
   CATV: [
     { label: "Customer Name", header: "CUSTOMER NAME", type: "text", required: true },
@@ -1038,8 +858,8 @@ var FIELD_DEFS = {
     { label: "Type of Connection", header: "TYPE OF CONNECTION", type: "select", required: true,
       options: ["CATV Operator Lead", "Cable Connection"], defaultValue: "CATV Operator Lead" },
     { label: "Agent Remarks", header: "AGENT REMARKS", type: "textarea" },
-    { label: "Sales", header: "SALES", type: "select", required: true, options: [] },
-    { label: "Team Leader", header: "TEAM LEADER", type: "select", required: true, options: [] }
+    { label: "Sales", header: "SALES", type: "select", options: [], skipOnAdd: true },
+    { label: "Team Leader", header: "TEAM LEADER", type: "select", options: [], skipOnAdd: true }
   ],
   ILL: [
     { label: "Company Name & Address", header: "Company Name & Address", type: "textarea" },
@@ -1070,7 +890,8 @@ var FIELD_DEFS = {
 function refreshSalesTeamLeaderOptions(type) {
   if (type === 'ILL') return;
   var leads = LEADS_BY_TYPE[type];
-  var salesSet = {}, tlSet = {};
+  var salesSet = { "Unassigned": true };
+  var tlSet = { "Unassigned": true };
   leads.forEach(function (l) {
     (l.sales_names || []).forEach(function (n) { salesSet[n] = true; });
     (l.team_leader_names || []).forEach(function (n) { tlSet[n] = true; });
