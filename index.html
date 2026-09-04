@@ -117,6 +117,8 @@
   td { padding: 8px 10px; border-bottom: 1px solid #eef1f4; }
   tr:last-child td { border-bottom: none; }
   td.num, th.num { text-align: right; }
+  tfoot td { font-weight: 700; color: var(--navy); border-top: 2px solid var(--border); border-bottom: none; }
+  .sheet-divider-row td { padding-top: 16px; }
 
   .status-pill { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 11px; font-weight: 600; }
   .status-Closed---Won { background: #e2f3e9; color: var(--teal); }
@@ -217,6 +219,7 @@
     <button class="sheet-nav-btn active" data-sheet="BB" onclick="switchSheet('BB')">Broadband (BB)</button>
     <button class="sheet-nav-btn" data-sheet="CATV" onclick="switchSheet('CATV')">CATV</button>
     <button class="sheet-nav-btn" data-sheet="ILL" onclick="switchSheet('ILL')">ILL / Corporate BB</button>
+    <button class="sheet-nav-btn" data-sheet="COMBINED" onclick="switchSheet('COMBINED')">Combined Report</button>
   </div>
 
   <main>
@@ -496,6 +499,25 @@
         </div>
       </div>
     </div>
+
+    <div id="sheet-panel-COMBINED" class="sheet-panel">
+      <div class="panel">
+        <h2>Combined report</h2>
+        <p class="note">
+          One row per month per sheet &mdash; Broadband, then CATV, then ILL / Corporate BB. CATV has no
+          revenue column in the source sheet, so its Monthly Revenue is left blank.
+        </p>
+        <div class="fy-select-row">
+          <label for="fy-select-COMBINED">Financial Year</label>
+          <select id="fy-select-COMBINED" onchange="renderCombinedReport()"></select>
+        </div>
+        <table id="combined-report-table">
+          <thead><tr><th>Sheet</th><th>Month</th><th class="num">Total Lead</th><th class="num">Lead Close</th><th class="num">Monthly Revenue</th></tr></thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -577,9 +599,31 @@ function switchSheet(type) {
   document.querySelectorAll('.sheet-panel').forEach(function (p) { p.classList.remove('active'); });
   document.getElementById('sheet-panel-' + type).classList.add('active');
 
+  if (type === 'COMBINED') {
+    loadCombinedReport();
+    return;
+  }
+
   if (!LOADED_BY_TYPE[type]) {
     loadSheetData(type);
   }
+}
+
+// Combined Report needs all three sheets loaded — fetch whichever
+// haven't been loaded yet, then render.
+async function loadCombinedReport() {
+  var banner = document.getElementById('loading-banner');
+  var needed = SHEET_TYPES.filter(function (t) { return !LOADED_BY_TYPE[t]; });
+  if (needed.length > 0) {
+    banner.style.display = 'block';
+    banner.textContent = 'Loading data for combined report\u2026';
+    for (var i = 0; i < needed.length; i++) {
+      await loadSheetData(needed[i]);
+    }
+    banner.style.display = 'none';
+  }
+  populateCombinedFySelect();
+  renderCombinedReport();
 }
 
 function switchInnerTab(type, tabName) {
@@ -843,6 +887,126 @@ function renderMonthTable(type) {
       '<td class="num">' + (closeCounts[m] || 0) + '</td>';
     tbody.appendChild(tr);
   });
+}
+
+
+// =============================================================================
+// COMBINED REPORT — one table spanning BB, CATV, ILL, grouped by month
+// within the selected financial year, with a Grand Total row.
+// =============================================================================
+function populateCombinedFySelect() {
+  var select = document.getElementById('fy-select-COMBINED');
+  var fySet = {};
+  SHEET_TYPES.forEach(function (type) {
+    (LEADS_BY_TYPE[type] || []).forEach(function (l) {
+      if (l.lead_gen_month) { var fy = getFinancialYearLabel(l.lead_gen_month); if (fy) fySet[fy] = true; }
+      if (l.close_month) { var fy2 = getFinancialYearLabel(l.close_month); if (fy2) fySet[fy2] = true; }
+    });
+  });
+  var fyList = Object.keys(fySet).sort();
+  var previousValue = select.value;
+  select.innerHTML = '<option value="">All financial years</option>' +
+    fyList.map(function (fy) { return '<option value="' + fy + '">' + fy + '</option>'; }).join('');
+  if (previousValue && fyList.indexOf(previousValue) !== -1) {
+    select.value = previousValue;
+  } else if (fyList.length > 0) {
+    select.value = fyList[fyList.length - 1];
+  }
+}
+
+// Computes { month -> { genCount, closeCount, revenue } } for one sheet
+// type, within the given FY filter (or all months if fyFilter is empty).
+function computeMonthlyStatsForSheet(type, fyFilter) {
+  var leads = LEADS_BY_TYPE[type] || [];
+  var stats = {}; // month key -> { gen, closed, revenue }
+
+  function ensure(m) {
+    stats[m] = stats[m] || { gen: 0, closed: 0, revenue: 0 };
+    return stats[m];
+  }
+
+  leads.forEach(function (l) {
+    if (l.lead_gen_month) {
+      var genFy = getFinancialYearLabel(l.lead_gen_month);
+      if (!fyFilter || genFy === fyFilter) {
+        ensure(l.lead_gen_month).gen++;
+      }
+    }
+    if (l.close_month) {
+      var closeFy = getFinancialYearLabel(l.close_month);
+      if (!fyFilter || closeFy === fyFilter) {
+        var entry = ensure(l.close_month);
+        entry.closed++;
+        if (type === 'BB' || type === 'ILL') {
+          var price = parseFloat(l.price);
+          if (!isNaN(price)) entry.revenue += price;
+        }
+      }
+    }
+  });
+
+  return stats;
+}
+
+function renderCombinedReport() {
+  var select = document.getElementById('fy-select-COMBINED');
+  var fyFilter = select.value;
+
+  var tbody = document.querySelector('#combined-report-table tbody');
+  var tfoot = document.querySelector('#combined-report-table tfoot');
+  tbody.innerHTML = '';
+  tfoot.innerHTML = '';
+
+  var sheetLabels = { BB: 'Broadband (BB)', CATV: 'CATV', ILL: 'ILL / Corporate BB' };
+  var grandTotalLead = 0, grandTotalClose = 0, grandTotalRevenue = 0;
+  var anyRows = false;
+
+  SHEET_TYPES.forEach(function (type) {
+    var stats = computeMonthlyStatsForSheet(type, fyFilter);
+    var months = Array.from(new Set(Object.keys(stats)));
+    months.sort(function (a, b) {
+      var fa = fyMonthKey(a), fb = fyMonthKey(b);
+      if (fa !== fb) return fa - fb;
+      return a < b ? -1 : (a > b ? 1 : 0);
+    });
+
+    if (months.length === 0) return;
+    anyRows = true;
+
+    months.forEach(function (m, idx) {
+      var monthName = MONTH_NUM_TO_NAME[m.split('-')[1]] || m;
+      var yearLabel = m.split('-')[0];
+      var s = stats[m];
+      var revenueCell = (type === 'CATV') ? '&mdash;' : fmtINR(s.revenue);
+
+      grandTotalLead += s.gen;
+      grandTotalClose += s.closed;
+      if (type !== 'CATV') grandTotalRevenue += s.revenue;
+
+      var tr = document.createElement('tr');
+      if (idx === 0) tr.className = 'sheet-divider-row';
+      tr.innerHTML =
+        '<td>' + (idx === 0 ? sheetLabels[type] : '') + '</td>' +
+        '<td>' + monthName + ' ' + yearLabel + '</td>' +
+        '<td class="num">' + s.gen + '</td>' +
+        '<td class="num">' + s.closed + '</td>' +
+        '<td class="num">' + revenueCell + '</td>';
+      tbody.appendChild(tr);
+    });
+  });
+
+  if (!anyRows) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty-note">No data</td></tr>';
+    return;
+  }
+
+  var footTr = document.createElement('tr');
+  footTr.innerHTML =
+    '<td colspan="2">Grand Total</td>' +
+    '<td class="num">' + grandTotalLead.toLocaleString('en-IN') + '</td>' +
+    '<td class="num">' + grandTotalClose.toLocaleString('en-IN') + '</td>' +
+    '<td class="num">' + fmtINR(grandTotalRevenue) + '</td>';
+  tfoot.appendChild(footTr);
 }
 
 
