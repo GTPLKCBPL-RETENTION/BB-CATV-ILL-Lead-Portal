@@ -246,7 +246,7 @@
         <div class="kpi-card">
           <div class="label">Revenue</div>
           <div class="value" id="kpi-revenue-BB">&mdash;</div>
-          <div class="subvalue" style="font-size:11px;color:var(--grey);margin-top:4px;">Monthly</div>
+          <div class="subvalue" id="kpi-revenue-BB-sub" style="font-size:11px;color:var(--grey);margin-top:4px;">Total</div>
         </div>
       </div>
 
@@ -769,23 +769,26 @@ function getCurrentMonthKey() {
   return year + '-' + month;
 }
 
-// BB: Closed leads (all-time) + Revenue for the CURRENT calendar month only
-// (by close_month, since revenue is realized when a deal closes).
+// BB: Closed leads (all-time) + Revenue totalled across the fixed
+// financial year FY 2026-27 (by close_month, since revenue is realized
+// when a deal closes) — not tied to the Month-wise (FY) tab's dropdown.
+var BB_REVENUE_FY_LABEL = "FY 2026-27";
 function renderBbKpis(leads) {
   var closedCount = 0;
-  var monthlyRevenue = 0;
-  var currentMonth = getCurrentMonthKey();
+  var fyRevenue = 0;
   leads.forEach(function (l) {
     if (isClosedStatus(l.status_raw, 'BB')) {
       closedCount++;
-      if (l.close_month === currentMonth) {
+      if (l.close_month && getFinancialYearLabel(l.close_month) === BB_REVENUE_FY_LABEL) {
         var price = parseFloat(l.price);
-        if (!isNaN(price)) monthlyRevenue += price;
+        if (!isNaN(price)) fyRevenue += price;
       }
     }
   });
   document.getElementById('kpi-closed-BB').textContent = closedCount.toLocaleString('en-IN');
-  document.getElementById('kpi-revenue-BB').textContent = fmtINR(monthlyRevenue);
+  document.getElementById('kpi-revenue-BB').textContent = fmtINR(fyRevenue);
+  var subEl = document.getElementById('kpi-revenue-BB-sub');
+  if (subEl) subEl.textContent = 'Total (' + BB_REVENUE_FY_LABEL + ')';
 }
 
 // CATV: Closed leads only (no revenue column in this sheet).
@@ -923,6 +926,10 @@ function renderGroupTable(tableId, groups) {
 // =============================================================================
 // RENDER: MONTH-WISE (FINANCIAL YEAR)
 // =============================================================================
+// Only these financial years are shown in any FY dropdown — all data
+// starts April 2026, so earlier FYs would always be empty anyway.
+var ALLOWED_FY_LABELS = ["FY 2026-27", "FY 2027-28"];
+
 function populateFySelect(type, leads) {
   var select = document.getElementById('fy-select-' + type);
   var fySet = {};
@@ -930,7 +937,7 @@ function populateFySelect(type, leads) {
     if (l.lead_gen_month) { var fy = getFinancialYearLabel(l.lead_gen_month); if (fy) fySet[fy] = true; }
     if (l.close_month) { var fy2 = getFinancialYearLabel(l.close_month); if (fy2) fySet[fy2] = true; }
   });
-  var fyList = Object.keys(fySet).sort();
+  var fyList = ALLOWED_FY_LABELS.filter(function (fy) { return fySet[fy]; });
   var previousValue = select.value;
   select.innerHTML = '<option value="">All financial years</option>' +
     fyList.map(function (fy) { return '<option value="' + fy + '">' + fy + '</option>'; }).join('');
@@ -1018,7 +1025,7 @@ function populateCombinedFySelect() {
       if (l.close_month) { var fy2 = getFinancialYearLabel(l.close_month); if (fy2) fySet[fy2] = true; }
     });
   });
-  var fyList = Object.keys(fySet).sort();
+  var fyList = ALLOWED_FY_LABELS.filter(function (fy) { return fySet[fy]; });
   var previousValue = select.value;
   select.innerHTML = '<option value="">All financial years</option>' +
     fyList.map(function (fy) { return '<option value="' + fy + '">' + fy + '</option>'; }).join('');
