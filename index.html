@@ -228,6 +228,14 @@
           <div class="label">Total leads</div>
           <div class="value" id="kpi-total-BB">&mdash;</div>
         </div>
+        <div class="kpi-card">
+          <div class="label">Closed leads</div>
+          <div class="value" id="kpi-closed-BB">&mdash;</div>
+        </div>
+        <div class="kpi-card">
+          <div class="label">Revenue</div>
+          <div class="value" id="kpi-revenue-BB">&mdash;</div>
+        </div>
       </div>
 
       <div class="tab-nav">
@@ -496,7 +504,7 @@
 // CONFIG
 // =============================================================================
 // Paste your Google Apps Script Web App URL here (see Code.gs install steps).
-var API_BASE = "https://script.google.com/macros/s/AKfycbw1oWzsbvacNVOm3yFkt41Hxaaw6lWwQlCaoMw0H6Q3ebykmLkXtYrEjkNVt19aaKS73g/exec";
+var API_BASE = "https://script.google.com/macros/s/AKfycbw1ci1tqEuO74eqaX1dj2Nc2m-2khxVKPi72t0EeNLNg5i_svYXyYwnp8FuR2XB-HKIzA/exec";
 
 var DASHBOARD_PASSWORD = "GTPLKCBPL";
 
@@ -631,10 +639,34 @@ function renderSheet(type) {
   var leads = LEADS_BY_TYPE[type];
   document.getElementById('kpi-total-' + type).textContent = leads.length.toLocaleString('en-IN');
 
+  if (type === 'BB') {
+    renderBbRevenueKpis(leads);
+  }
+
   refreshSalesTeamLeaderOptions(type);
   renderBreakupTables(type, leads);
   populateFySelect(type, leads);
   renderMonthTable(type);
+}
+
+// BB-only: Closed leads count + Revenue (sum of Price for closed leads).
+function fmtINR(n) {
+  if (n === null || n === undefined || isNaN(n)) return '\u2014';
+  return '\u20B9' + Math.round(n).toLocaleString('en-IN');
+}
+
+function renderBbRevenueKpis(leads) {
+  var closedCount = 0;
+  var revenue = 0;
+  leads.forEach(function (l) {
+    if (isClosedStatus(l.status_raw, 'BB')) {
+      closedCount++;
+      var price = parseFloat(l.price);
+      if (!isNaN(price)) revenue += price;
+    }
+  });
+  document.getElementById('kpi-closed-BB').textContent = closedCount.toLocaleString('en-IN');
+  document.getElementById('kpi-revenue-BB').textContent = fmtINR(revenue);
 }
 
 function statusClass(cat) {
