@@ -251,8 +251,8 @@
       </div>
 
       <div class="tab-nav">
-        <button class="tab-btn active" data-tab="breakup" onclick="switchInnerTab('BB','breakup')">Sales / Team Leader breakup</button>
-        <button class="tab-btn" data-tab="month" onclick="switchInnerTab('BB','month')">TL / Sales Breakup</button>
+        <button class="tab-btn active" data-tab="breakup" onclick="switchInnerTab('BB','breakup')">Overall Sales / TL Report</button>
+        <button class="tab-btn" data-tab="month" onclick="switchInnerTab('BB','month')">Monthly TL / Sales Report</button>
         <button class="tab-btn" data-tab="agent" onclick="switchInnerTab('BB','agent')">Agent Update</button>
       </div>
 
@@ -362,8 +362,8 @@
       </div>
 
       <div class="tab-nav">
-        <button class="tab-btn active" data-tab="breakup" onclick="switchInnerTab('CATV','breakup')">Sales / Team Leader breakup</button>
-        <button class="tab-btn" data-tab="month" onclick="switchInnerTab('CATV','month')">TL / Sales Breakup</button>
+        <button class="tab-btn active" data-tab="breakup" onclick="switchInnerTab('CATV','breakup')">Overall Sales / TL Report</button>
+        <button class="tab-btn" data-tab="month" onclick="switchInnerTab('CATV','month')">Monthly TL / Sales Report</button>
         <button class="tab-btn" data-tab="agent" onclick="switchInnerTab('CATV','agent')">Agent Update</button>
       </div>
 
@@ -1041,6 +1041,35 @@ function populateMonthSelect(type, leads) {
   }
 }
 
+// Deduplicates leads by mobile number for the TL/Sales Breakup tab only
+// (BB, CATV) — the source sheets sometimes have the same mobile number
+// entered multiple times under different customer names. When a mobile
+// number repeats, the row with status "Lead Close" wins (if any); if
+// there's a tie or no closed row at all, the LAST matching row (as it
+// appears in the sheet) is kept.
+function dedupeLeadsByMobile(leads) {
+  var byMobile = {}; // digits-only mobile -> kept lead
+  var noMobile = []; // leads with no usable mobile number pass through unchanged
+  leads.forEach(function (l) {
+    var digits = String(l.mobile || '').replace(/\D/g, '');
+    if (!digits) { noMobile.push(l); return; }
+    var existing = byMobile[digits];
+    if (!existing) {
+      byMobile[digits] = l;
+      return;
+    }
+    var existingClosed = isClosedStatus(existing.status_raw, existing._type);
+    var currentClosed = isClosedStatus(l.status_raw, l._type);
+    if (currentClosed || !existingClosed) {
+      // Later row wins on a tie (both closed, or neither closed) — and
+      // also wins outright if it's the closed one and existing isn't.
+      byMobile[digits] = l;
+    }
+    // else: existing is closed and current isn't — keep existing.
+  });
+  return noMobile.concat(Object.keys(byMobile).map(function (k) { return byMobile[k]; }));
+}
+
 function renderTlSalesByMonth(type) {
   var select = document.getElementById('month-select-' + type);
   var selectedMonth = select.value;
@@ -1048,6 +1077,8 @@ function renderTlSalesByMonth(type) {
   var container = document.getElementById('tl-sales-by-month-' + type);
 
   var monthLeads = leads.filter(function (l) { return getEffectiveGenMonth(l) === selectedMonth; });
+  monthLeads.forEach(function (l) { l._type = type; }); // tag for isClosedStatus inside dedupeLeadsByMobile
+  monthLeads = dedupeLeadsByMobile(monthLeads);
 
   if (!selectedMonth || monthLeads.length === 0) {
     container.innerHTML = '<p class="empty-note">No data for this month</p>';
