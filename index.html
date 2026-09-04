@@ -324,7 +324,9 @@
             Download the template, fill it in, then upload the .xlsx file. Customer Name, Mobile Number,
             Lead Status, Lead Source, and Type of Connection are required for every row &mdash; rows missing
             any of these are rejected. Rows with a mobile number already in the sheet are still uploaded,
-            but flagged in the summary.
+            but flagged in the summary. The template's second tab ("Options") lists the valid values for
+            Lead Status, Lead Source, and Type of Connection &mdash; use Excel's Data &gt; Data Validation
+            to turn those columns into dropdowns referencing that sheet, if you'd like.
           </p>
           <button class="modal-btn-secondary" onclick="downloadBulkTemplate('BB')">Download template</button>
           <div style="margin-top:12px;">
@@ -435,7 +437,9 @@
             Download the template, fill it in, then upload the .xlsx file. Customer Name, Mobile Number,
             Lead Status, Lead Source, and Type of Connection are required for every row &mdash; rows missing
             any of these are rejected. Rows with a mobile number already in the sheet are still uploaded,
-            but flagged in the summary.
+            but flagged in the summary. The template's second tab ("Options") lists the valid values for
+            Lead Status, Lead Source, and Type of Connection &mdash; use Excel's Data &gt; Data Validation
+            to turn those columns into dropdowns referencing that sheet, if you'd like.
           </p>
           <button class="modal-btn-secondary" onclick="downloadBulkTemplate('CATV')">Download template</button>
           <div style="margin-top:12px;">
@@ -580,7 +584,7 @@
 // CONFIG
 // =============================================================================
 // Paste your Google Apps Script Web App URL here (see Code.gs install steps).
-var API_BASE = "https://script.google.com/macros/s/AKfycbwXa4psv_yBvA6P5ZuaplwFgVoKI9AqlwgrwD2Eyi2KSZPqDYFTe1DA7vWTKpRvws_Zfw/exec";
+var API_BASE = "https://script.google.com/macros/s/AKfycbxm50GHMq_PzkZt4GsMJSMjomuY4Xz_7-GxLeZN-qWGxYosf0jXISt98emEFqaAnablfQ/exec";
 
 var DASHBOARD_PASSWORD = "GTPLKCBPL";
 
@@ -940,6 +944,19 @@ function populateFySelect(type, leads) {
   SELECTED_FY[type] = select.value;
 }
 
+// If a lead was generated before April 2026 AND has a close_month, its
+// "Total Lead" count is attributed to the close_month instead of its
+// actual generation month. If there's no close_month, it stays on its
+// real generation month. Leads generated April 2026 or later are
+// unaffected either way.
+var CUTOFF_MONTH_KEY = "2026-04";
+function getEffectiveGenMonth(lead) {
+  if (lead.lead_gen_month && lead.lead_gen_month < CUTOFF_MONTH_KEY && lead.close_month) {
+    return lead.close_month;
+  }
+  return lead.lead_gen_month;
+}
+
 function renderMonthTable(type) {
   var select = document.getElementById('fy-select-' + type);
   SELECTED_FY[type] = select.value;
@@ -949,10 +966,11 @@ function renderMonthTable(type) {
   var genCounts = {};
   var closeCounts = {};
   leads.forEach(function (l) {
-    if (l.lead_gen_month) {
-      var genFy = getFinancialYearLabel(l.lead_gen_month);
+    var effectiveGenMonth = getEffectiveGenMonth(l);
+    if (effectiveGenMonth) {
+      var genFy = getFinancialYearLabel(effectiveGenMonth);
       if (!fyFilter || genFy === fyFilter) {
-        genCounts[l.lead_gen_month] = (genCounts[l.lead_gen_month] || 0) + 1;
+        genCounts[effectiveGenMonth] = (genCounts[effectiveGenMonth] || 0) + 1;
       }
     }
     if (l.close_month) {
@@ -1023,10 +1041,11 @@ function computeMonthlyStatsForSheet(type, fyFilter) {
   }
 
   leads.forEach(function (l) {
-    if (l.lead_gen_month) {
-      var genFy = getFinancialYearLabel(l.lead_gen_month);
+    var effectiveGenMonth = getEffectiveGenMonth(l);
+    if (effectiveGenMonth) {
+      var genFy = getFinancialYearLabel(effectiveGenMonth);
       if (!fyFilter || genFy === fyFilter) {
-        ensure(l.lead_gen_month).gen++;
+        ensure(effectiveGenMonth).gen++;
       }
     }
     if (l.close_month) {
@@ -1578,6 +1597,23 @@ function downloadBulkTemplate(type) {
   var ws = XLSX.utils.aoa_to_sheet([headers]);
   var wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Template');
+
+  // "Options" reference sheet — one column per select-type field, listing
+  // its valid values. Excel's Data Validation (List) can't be written by
+  // the free SheetJS build, so this sheet is provided for the user to set
+  // up dropdowns manually (Data > Data Validation, referencing this sheet).
+  var selectFields = fields.filter(function (f) { return f.type === 'select' && f.options && f.options.length > 0; });
+  if (selectFields.length > 0) {
+    var optionColumns = selectFields.map(function (f) { return [f.label].concat(f.options); });
+    var maxLen = Math.max.apply(null, optionColumns.map(function (col) { return col.length; }));
+    var optionRows = [];
+    for (var r = 0; r < maxLen; r++) {
+      optionRows.push(optionColumns.map(function (col) { return col[r] !== undefined ? col[r] : ''; }));
+    }
+    var optionsWs = XLSX.utils.aoa_to_sheet(optionRows);
+    XLSX.utils.book_append_sheet(wb, optionsWs, 'Options');
+  }
+
   XLSX.writeFile(wb, type + '_bulk_upload_template.xlsx');
 }
 
