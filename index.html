@@ -246,6 +246,7 @@
         <div class="kpi-card">
           <div class="label">Revenue</div>
           <div class="value" id="kpi-revenue-BB">&mdash;</div>
+          <div class="subvalue" style="font-size:11px;color:var(--grey);margin-top:4px;">Monthly</div>
         </div>
       </div>
 
@@ -355,6 +356,10 @@
           <div class="label">Total leads</div>
           <div class="value" id="kpi-total-CATV">&mdash;</div>
         </div>
+        <div class="kpi-card">
+          <div class="label">Closed leads</div>
+          <div class="value" id="kpi-closed-CATV">&mdash;</div>
+        </div>
       </div>
 
       <div class="tab-nav">
@@ -461,6 +466,15 @@
         <div class="kpi-card">
           <div class="label">Total leads</div>
           <div class="value" id="kpi-total-ILL">&mdash;</div>
+        </div>
+        <div class="kpi-card">
+          <div class="label">Closed leads</div>
+          <div class="value" id="kpi-closed-ILL">&mdash;</div>
+        </div>
+        <div class="kpi-card">
+          <div class="label">Revenue</div>
+          <div class="value" id="kpi-revenue-ILL">&mdash;</div>
+          <div class="subvalue" style="font-size:11px;color:var(--grey);margin-top:4px;">Annual</div>
         </div>
       </div>
 
@@ -724,7 +738,11 @@ function renderSheet(type) {
   document.getElementById('kpi-total-' + type).textContent = leads.length.toLocaleString('en-IN');
 
   if (type === 'BB') {
-    renderBbRevenueKpis(leads);
+    renderBbKpis(leads);
+  } else if (type === 'CATV') {
+    renderCatvKpis(leads);
+  } else if (type === 'ILL') {
+    renderIllKpis(leads);
   }
 
   refreshSalesTeamLeaderOptions(type);
@@ -733,24 +751,62 @@ function renderSheet(type) {
   renderMonthTable(type);
 }
 
-// BB-only: Closed leads count + Revenue (sum of Price for closed leads).
 function fmtINR(n) {
   if (n === null || n === undefined || isNaN(n)) return '\u2014';
   return '\u20B9' + Math.round(n).toLocaleString('en-IN');
 }
 
-function renderBbRevenueKpis(leads) {
+// The current calendar month as a "YYYY-MM" key, matching lead_gen_month
+// / close_month's format.
+function getCurrentMonthKey() {
+  var now = new Date();
+  var year = now.getFullYear();
+  var month = String(now.getMonth() + 1).padStart(2, '0');
+  return year + '-' + month;
+}
+
+// BB: Closed leads (all-time) + Revenue for the CURRENT calendar month only
+// (by close_month, since revenue is realized when a deal closes).
+function renderBbKpis(leads) {
   var closedCount = 0;
-  var revenue = 0;
+  var monthlyRevenue = 0;
+  var currentMonth = getCurrentMonthKey();
   leads.forEach(function (l) {
     if (isClosedStatus(l.status_raw, 'BB')) {
       closedCount++;
-      var price = parseFloat(l.price);
-      if (!isNaN(price)) revenue += price;
+      if (l.close_month === currentMonth) {
+        var price = parseFloat(l.price);
+        if (!isNaN(price)) monthlyRevenue += price;
+      }
     }
   });
   document.getElementById('kpi-closed-BB').textContent = closedCount.toLocaleString('en-IN');
-  document.getElementById('kpi-revenue-BB').textContent = fmtINR(revenue);
+  document.getElementById('kpi-revenue-BB').textContent = fmtINR(monthlyRevenue);
+}
+
+// CATV: Closed leads only (no revenue column in this sheet).
+function renderCatvKpis(leads) {
+  var closedCount = 0;
+  leads.forEach(function (l) {
+    if (isClosedStatus(l.status_raw, 'CATV')) closedCount++;
+  });
+  document.getElementById('kpi-closed-CATV').textContent = closedCount.toLocaleString('en-IN');
+}
+
+// ILL: Closed leads (all-time) + Revenue for the whole year (annual, not
+// filtered by month) — matches the Price (Rs.) column for closed leads.
+function renderIllKpis(leads) {
+  var closedCount = 0;
+  var annualRevenue = 0;
+  leads.forEach(function (l) {
+    if (isClosedStatus(l.status_raw, 'ILL')) {
+      closedCount++;
+      var price = parseFloat(l.price);
+      if (!isNaN(price)) annualRevenue += price;
+    }
+  });
+  document.getElementById('kpi-closed-ILL').textContent = closedCount.toLocaleString('en-IN');
+  document.getElementById('kpi-revenue-ILL').textContent = fmtINR(annualRevenue);
 }
 
 function statusClass(cat) {
@@ -874,11 +930,12 @@ function populateFySelect(type, leads) {
   var previousValue = select.value;
   select.innerHTML = '<option value="">All financial years</option>' +
     fyList.map(function (fy) { return '<option value="' + fy + '">' + fy + '</option>'; }).join('');
-  // Restore previous selection if it's still valid, else default to the most recent FY.
+  // Restore previous selection if it's still valid; otherwise default to
+  // "All financial years" (blank) rather than the most recent FY.
   if (previousValue && fyList.indexOf(previousValue) !== -1) {
     select.value = previousValue;
-  } else if (fyList.length > 0) {
-    select.value = fyList[fyList.length - 1];
+  } else {
+    select.value = '';
   }
   SELECTED_FY[type] = select.value;
 }
@@ -949,8 +1006,8 @@ function populateCombinedFySelect() {
     fyList.map(function (fy) { return '<option value="' + fy + '">' + fy + '</option>'; }).join('');
   if (previousValue && fyList.indexOf(previousValue) !== -1) {
     select.value = previousValue;
-  } else if (fyList.length > 0) {
-    select.value = fyList[fyList.length - 1];
+  } else {
+    select.value = '';
   }
 }
 
