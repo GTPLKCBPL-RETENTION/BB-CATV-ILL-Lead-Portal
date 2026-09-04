@@ -118,7 +118,10 @@
   td { padding: 8px 10px; border-bottom: 1px solid #eef1f4; }
   tr:last-child td { border-bottom: none; }
   td.num, th.num { text-align: right; }
-  tfoot td { font-weight: 700; color: var(--navy); border-top: 2px solid var(--border); border-bottom: none; }
+  tfoot td {
+    font-weight: 700; color: var(--navy); border-top: 2px solid var(--navy);
+    border-bottom: none; background: #eef2f6; font-size: 14px; padding-top: 12px; padding-bottom: 12px;
+  }
   .sheet-divider-row td { padding-top: 16px; }
 
   .status-pill { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 11px; font-weight: 600; }
@@ -192,6 +195,7 @@
 
 <div id="login-screen">
   <div class="card">
+    <img src="https://raw.githubusercontent.com/GTPLKCBPL-RETENTION/-Lead-validation-portal/main/logo.png" alt="GTPL KCBPL logo" style="height:48px; width:auto; margin-bottom:16px; border-radius:4px;">
     <h1>BB / CATV / ILL Lead Portal</h1>
     <p class="sub">GTPL KCBPL &mdash; Lead Management</p>
     <div id="login-error">Incorrect password. Please try again.</div>
@@ -205,9 +209,12 @@
 
 <div id="dashboard-screen" style="display:none;">
   <header>
-    <div>
-      <h1>BB / CATV / ILL Lead Portal</h1>
-      <div class="sub">GTPL KCBPL &mdash; Lead Management</div>
+    <div style="display:flex; align-items:center; gap:14px;">
+      <img src="https://raw.githubusercontent.com/GTPLKCBPL-RETENTION/-Lead-validation-portal/main/logo.png" alt="GTPL KCBPL logo" style="height:40px; width:auto; border-radius:4px;">
+      <div>
+        <h1>BB / CATV / ILL Lead Portal</h1>
+        <div class="sub">GTPL KCBPL &mdash; Lead Management</div>
+      </div>
     </div>
     <div class="actions">
       <span id="refresh-status"></span>
@@ -991,6 +998,12 @@ function renderCombinedReport() {
   tfoot.innerHTML = '';
 
   var sheetLabels = { BB: 'Broadband (BB)', CATV: 'CATV', ILL: 'ILL / Corporate BB' };
+  var sheetColors = {
+    BB: { bg: '#eaf0fb', text: 'var(--blue)' },
+    CATV: { bg: '#e2f3e9', text: 'var(--teal)' },
+    ILL: { bg: '#fdf3e3', text: 'var(--amber)' }
+  };
+  var sheetRowTints = { BB: '#f7fafd', CATV: '#f4faf7', ILL: '#fefaf3' };
   var grandTotalLead = 0, grandTotalClose = 0, grandTotalRevenue = 0;
   var anyRows = false;
 
@@ -1005,24 +1018,31 @@ function renderCombinedReport() {
 
     if (months.length === 0) return;
     anyRows = true;
+    var color = sheetColors[type];
+    var rowTint = sheetRowTints[type];
 
     months.forEach(function (m, idx) {
       var monthName = MONTH_NUM_TO_NAME[m.split('-')[1]] || m;
       var yearLabel = m.split('-')[0];
       var s = stats[m];
-      var revenueCell = (type === 'CATV') ? '&mdash;' : fmtINR(s.revenue);
+      var revenueCell = (type === 'CATV') ? '&mdash;' : ('<strong style="color:var(--teal);">' + fmtINR(s.revenue) + '</strong>');
 
       grandTotalLead += s.gen;
       grandTotalClose += s.closed;
       if (type !== 'CATV') grandTotalRevenue += s.revenue;
 
+      var sheetLabelCell = (idx === 0)
+        ? '<span style="display:inline-block; background:' + color.bg + '; color:' + color.text + '; font-weight:700; padding:3px 12px; border-radius:12px; font-size:12px;">' + sheetLabels[type] + '</span>'
+        : '';
+
       var tr = document.createElement('tr');
+      tr.style.background = rowTint;
       if (idx === 0) tr.className = 'sheet-divider-row';
       tr.innerHTML =
-        '<td>' + (idx === 0 ? sheetLabels[type] : '') + '</td>' +
+        '<td>' + sheetLabelCell + '</td>' +
         '<td>' + monthName + ' ' + yearLabel + '</td>' +
-        '<td class="num">' + s.gen + '</td>' +
-        '<td class="num">' + s.closed + '</td>' +
+        '<td class="num"><strong>' + s.gen + '</strong></td>' +
+        '<td class="num"><strong>' + s.closed + '</strong></td>' +
         '<td class="num">' + revenueCell + '</td>';
       tbody.appendChild(tr);
     });
