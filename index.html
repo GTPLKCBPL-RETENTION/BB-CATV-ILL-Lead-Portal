@@ -1306,9 +1306,10 @@ function populateMonthSelect(type, leads) {
 // Deduplicates leads by mobile number for the TL/Sales Breakup tab only
 // (BB, CATV) — the source sheets sometimes have the same mobile number
 // entered multiple times under different customer names. When a mobile
-// number repeats, the row with status "Lead Close" wins (if any); if
-// there's a tie or no closed row at all, the LAST matching row (as it
-// appears in the sheet) is kept.
+// number repeats, the row with the EARLIEST lead generation date wins
+// (that's the original/first entry for that customer). Rows with no
+// usable generation date are treated as later than any dated row, so a
+// dated row always wins over an undated one.
 function dedupeLeadsByMobile(leads) {
   var byMobile = {}; // digits-only mobile -> kept lead
   var noMobile = []; // leads with no usable mobile number pass through unchanged
@@ -1320,14 +1321,16 @@ function dedupeLeadsByMobile(leads) {
       byMobile[digits] = l;
       return;
     }
-    var existingClosed = isClosedStatus(existing.status_raw, existing._type);
-    var currentClosed = isClosedStatus(l.status_raw, l._type);
-    if (currentClosed || !existingClosed) {
-      // Later row wins on a tie (both closed, or neither closed) — and
-      // also wins outright if it's the closed one and existing isn't.
+    var existingDate = existing.lead_gen_date || '';
+    var currentDate = l.lead_gen_date || '';
+    if (!existingDate && currentDate) {
+      // Existing has no date but current does — current wins.
+      byMobile[digits] = l;
+    } else if (existingDate && currentDate && currentDate < existingDate) {
+      // Current is earlier than existing — current wins.
       byMobile[digits] = l;
     }
-    // else: existing is closed and current isn't — keep existing.
+    // else: existing is earlier (or both are undated) — keep existing.
   });
   return noMobile.concat(Object.keys(byMobile).map(function (k) { return byMobile[k]; }));
 }
