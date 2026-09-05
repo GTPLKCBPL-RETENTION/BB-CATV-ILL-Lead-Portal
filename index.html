@@ -954,7 +954,7 @@ function renderBreakupTables(type, leads) {
       (l.rm_names || []).forEach(function (name) {
         rmGroups[name] = rmGroups[name] || { total: 0, closed: 0 };
         rmGroups[name].total++;
-        if (isClosedStatus(l.status_raw, type)) rmGroups[name].closed++;
+        if (l.close_month) rmGroups[name].closed++;
       });
     });
     renderGroupTable('sales-table-ILL', rmGroups);
@@ -968,12 +968,12 @@ function renderBreakupTables(type, leads) {
     (l.sales_names || []).forEach(function (name) {
       salesGroups[name] = salesGroups[name] || { total: 0, closed: 0 };
       salesGroups[name].total++;
-      if (isClosedStatus(l.status_raw, type)) salesGroups[name].closed++;
+      if (l.close_month) salesGroups[name].closed++;
     });
     (l.team_leader_names || []).forEach(function (name) {
       tlGroups[name] = tlGroups[name] || { total: 0, closed: 0 };
       tlGroups[name].total++;
-      if (isClosedStatus(l.status_raw, type)) tlGroups[name].closed++;
+      if (l.close_month) tlGroups[name].closed++;
     });
   });
   renderGroupTable('sales-table-' + type, salesGroups);
@@ -989,7 +989,7 @@ function renderSourceAndStatusTables(type, leads) {
     var src = l.lead_source || '(Unknown Source)';
     sourceGroups[src] = sourceGroups[src] || { total: 0, closed: 0 };
     sourceGroups[src].total++;
-    if (isClosedStatus(l.status_raw, type)) sourceGroups[src].closed++;
+    if (l.close_month) sourceGroups[src].closed++;
   });
   renderGroupTable('source-table-' + type, sourceGroups, 'Lead Source');
 
