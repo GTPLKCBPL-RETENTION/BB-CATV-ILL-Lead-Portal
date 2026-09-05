@@ -189,6 +189,15 @@
   .modal-btn-danger { background: var(--red); border: none; color: #fff; padding: 9px 18px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
 
   #add-lead-toggle-btn { margin-bottom: 6px; }
+
+  .lf-filter-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
+  @media (max-width: 1000px) { .lf-filter-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 600px) { .lf-filter-grid { grid-template-columns: 1fr; } }
+  .lf-filter-grid select, .lf-filter-grid input {
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; width: 100%;
+  }
+  .lf-filter-actions { display: flex; gap: 10px; margin-bottom: 16px; }
+  .lf-result-count { font-size: 12px; color: var(--grey); margin-bottom: 10px; }
 </style>
 </head>
 <body>
@@ -254,6 +263,7 @@
         <button class="tab-btn active" data-tab="breakup" onclick="switchInnerTab('BB','breakup')">Overall Sales / TL Report</button>
         <button class="tab-btn" data-tab="month" onclick="switchInnerTab('BB','month')">Monthly TL / Sales Report</button>
         <button class="tab-btn" data-tab="agent" onclick="switchInnerTab('BB','agent')">Agent Update</button>
+        <button class="tab-btn" data-tab="filter" onclick="switchInnerTab('BB','filter')">Lead Filter</button>
       </div>
 
       <div id="inner-BB-breakup" class="tab-panel active">
@@ -347,6 +357,41 @@
           <div id="agent-results-BB"></div>
         </div>
       </div>
+
+      <div id="inner-BB-filter" class="tab-panel">
+        <div class="panel">
+          <h2>Lead Filter</h2>
+          <p class="note">Filter leads by status, sales/team leader, and lead generation date range. Newest leads appear first.</p>
+          <div class="lf-filter-grid">
+            <div class="filter-group">
+              <label>Lead Status</label>
+              <select id="lf-status-BB"><option value="">All statuses</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Sales</label>
+              <select id="lf-sales-BB"><option value="">All sales</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Team Leader</label>
+              <select id="lf-tl-BB"><option value="">All team leaders</option></select>
+            </div>
+            <div class="filter-group">
+              <label>From date</label>
+              <input type="date" id="lf-from-BB">
+            </div>
+            <div class="filter-group">
+              <label>To date</label>
+              <input type="date" id="lf-to-BB">
+            </div>
+          </div>
+          <div class="lf-filter-actions">
+            <button class="primary-btn" onclick="applyLeadFilter('BB')">Apply filter</button>
+            <button class="modal-btn-secondary" onclick="resetLeadFilter('BB')">Reset</button>
+          </div>
+          <div class="lf-result-count" id="lf-count-BB"></div>
+          <div id="lf-results-BB"></div>
+        </div>
+      </div>
     </div>
 
     <div id="sheet-panel-CATV" class="sheet-panel">
@@ -365,6 +410,7 @@
         <button class="tab-btn active" data-tab="breakup" onclick="switchInnerTab('CATV','breakup')">Overall Sales / TL Report</button>
         <button class="tab-btn" data-tab="month" onclick="switchInnerTab('CATV','month')">Monthly TL / Sales Report</button>
         <button class="tab-btn" data-tab="agent" onclick="switchInnerTab('CATV','agent')">Agent Update</button>
+        <button class="tab-btn" data-tab="filter" onclick="switchInnerTab('CATV','filter')">Lead Filter</button>
       </div>
 
       <div id="inner-CATV-breakup" class="tab-panel active">
@@ -459,6 +505,41 @@
           <div id="agent-results-CATV"></div>
         </div>
       </div>
+
+      <div id="inner-CATV-filter" class="tab-panel">
+        <div class="panel">
+          <h2>Lead Filter</h2>
+          <p class="note">Filter leads by status, sales/team leader, and lead generation date range. Newest leads appear first.</p>
+          <div class="lf-filter-grid">
+            <div class="filter-group">
+              <label>Lead Status</label>
+              <select id="lf-status-CATV"><option value="">All statuses</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Sales</label>
+              <select id="lf-sales-CATV"><option value="">All sales</option></select>
+            </div>
+            <div class="filter-group">
+              <label>Team Leader</label>
+              <select id="lf-tl-CATV"><option value="">All team leaders</option></select>
+            </div>
+            <div class="filter-group">
+              <label>From date</label>
+              <input type="date" id="lf-from-CATV">
+            </div>
+            <div class="filter-group">
+              <label>To date</label>
+              <input type="date" id="lf-to-CATV">
+            </div>
+          </div>
+          <div class="lf-filter-actions">
+            <button class="primary-btn" onclick="applyLeadFilter('CATV')">Apply filter</button>
+            <button class="modal-btn-secondary" onclick="resetLeadFilter('CATV')">Reset</button>
+          </div>
+          <div class="lf-result-count" id="lf-count-CATV"></div>
+          <div id="lf-results-CATV"></div>
+        </div>
+      </div>
     </div>
 
     <div id="sheet-panel-ILL" class="sheet-panel">
@@ -482,6 +563,7 @@
         <button class="tab-btn active" data-tab="breakup" onclick="switchInnerTab('ILL','breakup')">RM-wise breakup</button>
         <button class="tab-btn" data-tab="month" onclick="switchInnerTab('ILL','month')">Month-wise (FY)</button>
         <button class="tab-btn" data-tab="agent" onclick="switchInnerTab('ILL','agent')">Agent Update</button>
+        <button class="tab-btn" data-tab="filter" onclick="switchInnerTab('ILL','filter')">Lead Filter</button>
       </div>
 
       <div id="inner-ILL-breakup" class="tab-panel active">
@@ -550,6 +632,37 @@
           </div>
           <div id="agent-search-status-ILL" class="agent-status-msg" style="display:none;"></div>
           <div id="agent-results-ILL"></div>
+        </div>
+      </div>
+
+      <div id="inner-ILL-filter" class="tab-panel">
+        <div class="panel">
+          <h2>Lead Filter</h2>
+          <p class="note">Filter leads by status, RM name, and lead date range. Newest leads appear first.</p>
+          <div class="lf-filter-grid">
+            <div class="filter-group">
+              <label>Lead Status</label>
+              <select id="lf-status-ILL"><option value="">All statuses</option></select>
+            </div>
+            <div class="filter-group">
+              <label>RM Name</label>
+              <select id="lf-sales-ILL"><option value="">All RM</option></select>
+            </div>
+            <div class="filter-group">
+              <label>From date</label>
+              <input type="date" id="lf-from-ILL">
+            </div>
+            <div class="filter-group">
+              <label>To date</label>
+              <input type="date" id="lf-to-ILL">
+            </div>
+          </div>
+          <div class="lf-filter-actions">
+            <button class="primary-btn" onclick="applyLeadFilter('ILL')">Apply filter</button>
+            <button class="modal-btn-secondary" onclick="resetLeadFilter('ILL')">Reset</button>
+          </div>
+          <div class="lf-result-count" id="lf-count-ILL"></div>
+          <div id="lf-results-ILL"></div>
         </div>
       </div>
     </div>
@@ -747,6 +860,7 @@ function renderSheet(type) {
 
   refreshSalesTeamLeaderOptions(type);
   renderBreakupTables(type, leads);
+  populateLeadFilterOptions(type);
 
   if (type === 'ILL') {
     populateFySelect(type, leads);
@@ -923,6 +1037,154 @@ function renderGroupTable(tableId, groups) {
       '<td class="num">' + row.closed + '</td>';
     tbody.appendChild(tr);
   });
+}
+
+// =============================================================================
+// LEAD FILTER TAB (view-only) — filter by status, sales/TL (or RM for
+// ILL), and lead-generation date range. Results are sorted newest-first
+// by lead_gen_date.
+// =============================================================================
+function populateLeadFilterOptions(type) {
+  var leads = LEADS_BY_TYPE[type] || [];
+
+  var statusSet = {};
+  leads.forEach(function (l) {
+    var s = l.status_raw || '(Blank)';
+    statusSet[s] = true;
+  });
+  var statusList = Object.keys(statusSet).sort();
+  var statusSelect = document.getElementById('lf-status-' + type);
+  if (statusSelect) {
+    var prevStatus = statusSelect.value;
+    statusSelect.innerHTML = '<option value="">All statuses</option>' +
+      statusList.map(function (s) { return '<option value="' + s + '">' + s + '</option>'; }).join('');
+    if (statusList.indexOf(prevStatus) !== -1) statusSelect.value = prevStatus;
+  }
+
+  if (type === 'ILL') {
+    var rmSet = {};
+    leads.forEach(function (l) { (l.rm_names || []).forEach(function (n) { rmSet[n] = true; }); });
+    var rmList = Object.keys(rmSet).sort();
+    var rmSelect = document.getElementById('lf-sales-' + type);
+    if (rmSelect) {
+      var prevRm = rmSelect.value;
+      rmSelect.innerHTML = '<option value="">All RM</option>' +
+        rmList.map(function (n) { return '<option value="' + n + '">' + n + '</option>'; }).join('');
+      if (rmList.indexOf(prevRm) !== -1) rmSelect.value = prevRm;
+    }
+    return;
+  }
+
+  var salesSet = {};
+  var tlSet = {};
+  leads.forEach(function (l) {
+    (l.sales_names || []).forEach(function (n) { salesSet[n] = true; });
+    (l.team_leader_names || []).forEach(function (n) { tlSet[n] = true; });
+  });
+  var salesList = Object.keys(salesSet).sort();
+  var tlList = Object.keys(tlSet).sort();
+
+  var salesSelect = document.getElementById('lf-sales-' + type);
+  if (salesSelect) {
+    var prevSales = salesSelect.value;
+    salesSelect.innerHTML = '<option value="">All sales</option>' +
+      salesList.map(function (n) { return '<option value="' + n + '">' + n + '</option>'; }).join('');
+    if (salesList.indexOf(prevSales) !== -1) salesSelect.value = prevSales;
+  }
+
+  var tlSelect = document.getElementById('lf-tl-' + type);
+  if (tlSelect) {
+    var prevTl = tlSelect.value;
+    tlSelect.innerHTML = '<option value="">All team leaders</option>' +
+      tlList.map(function (n) { return '<option value="' + n + '">' + n + '</option>'; }).join('');
+    if (tlList.indexOf(prevTl) !== -1) tlSelect.value = prevTl;
+  }
+}
+
+function resetLeadFilter(type) {
+  var statusEl = document.getElementById('lf-status-' + type);
+  var salesEl = document.getElementById('lf-sales-' + type);
+  var tlEl = document.getElementById('lf-tl-' + type);
+  var fromEl = document.getElementById('lf-from-' + type);
+  var toEl = document.getElementById('lf-to-' + type);
+  if (statusEl) statusEl.value = '';
+  if (salesEl) salesEl.value = '';
+  if (tlEl) tlEl.value = '';
+  if (fromEl) fromEl.value = '';
+  if (toEl) toEl.value = '';
+  document.getElementById('lf-count-' + type).textContent = '';
+  document.getElementById('lf-results-' + type).innerHTML = '';
+}
+
+function applyLeadFilter(type) {
+  var leads = LEADS_BY_TYPE[type] || [];
+  var statusVal = (document.getElementById('lf-status-' + type) || {}).value || '';
+  var salesVal = (document.getElementById('lf-sales-' + type) || {}).value || '';
+  var tlVal = (document.getElementById('lf-tl-' + type) || {}).value || '';
+  var fromVal = (document.getElementById('lf-from-' + type) || {}).value || '';
+  var toVal = (document.getElementById('lf-to-' + type) || {}).value || '';
+
+  var filtered = leads.filter(function (l) {
+    if (statusVal && String(l.status_raw || '(Blank)') !== statusVal) return false;
+
+    if (type === 'ILL') {
+      if (salesVal && (l.rm_names || []).indexOf(salesVal) === -1) return false;
+    } else {
+      if (salesVal && (l.sales_names || []).indexOf(salesVal) === -1) return false;
+      if (tlVal && (l.team_leader_names || []).indexOf(tlVal) === -1) return false;
+    }
+
+    if (fromVal && (!l.lead_gen_date || l.lead_gen_date < fromVal)) return false;
+    if (toVal && (!l.lead_gen_date || l.lead_gen_date > toVal)) return false;
+
+    return true;
+  });
+
+  // Newest first, by lead generation date. Leads with no date sink to the bottom.
+  filtered.sort(function (a, b) {
+    var da = a.lead_gen_date || '';
+    var db = b.lead_gen_date || '';
+    if (da === db) return 0;
+    if (!da) return 1;
+    if (!db) return -1;
+    return da < db ? 1 : -1;
+  });
+
+  renderLeadFilterResults(type, filtered);
+}
+
+function renderLeadFilterResults(type, leads) {
+  var countEl = document.getElementById('lf-count-' + type);
+  var container = document.getElementById('lf-results-' + type);
+  countEl.textContent = leads.length.toLocaleString('en-IN') + ' lead' + (leads.length === 1 ? '' : 's') + ' found';
+
+  if (leads.length === 0) {
+    container.innerHTML = '<p class="empty-note">No leads match this filter</p>';
+    return;
+  }
+
+  var nameKey = (type === 'ILL') ? 'contact_person' : 'customer_name';
+  var ownerLabel = (type === 'ILL') ? 'RM Name' : 'Sales / TL';
+
+  var html = '<table><thead><tr>' +
+    '<th>Date</th><th>Name</th><th>Mobile</th><th>Status</th><th>' + ownerLabel + '</th>' +
+    '</tr></thead><tbody>';
+
+  leads.forEach(function (l) {
+    var owner = (type === 'ILL')
+      ? (l.rm_names || []).join(', ')
+      : (l.sales_names || []).concat(l.team_leader_names || []).join(', ');
+    html += '<tr>' +
+      '<td>' + (l.lead_gen_date || '\u2014') + '</td>' +
+      '<td>' + (l[nameKey] || '\u2014') + '</td>' +
+      '<td>' + (l.mobile || '\u2014') + '</td>' +
+      '<td><span class="status-pill ' + statusClass(l.status_raw || '') + '">' + (l.status_raw || '\u2014') + '</span></td>' +
+      '<td>' + (owner || '\u2014') + '</td>' +
+      '</tr>';
+  });
+
+  html += '</tbody></table>';
+  container.innerHTML = html;
 }
 
 // =============================================================================
