@@ -1341,29 +1341,51 @@ function renderTlSalesByMonth(type) {
   var leads = LEADS_BY_TYPE[type] || [];
   var container = document.getElementById('tl-sales-by-month-' + type);
 
-  var monthLeads = leads.filter(function (l) { return getEffectiveGenMonth(l) === selectedMonth; });
-  monthLeads.forEach(function (l) { l._type = type; }); // tag for isClosedStatus inside dedupeLeadsByMobile
-  monthLeads = dedupeLeadsByMobile(monthLeads);
+  leads.forEach(function (l) { l._type = type; }); // tag for isClosedStatus inside dedupeLeadsByMobile
 
-  if (!selectedMonth || monthLeads.length === 0) {
+  // "Total leads" = leads whose EFFECTIVE generation month is the selected
+  // month (same as before), deduped by mobile within that set.
+  var totalLeads = leads.filter(function (l) { return getEffectiveGenMonth(l) === selectedMonth; });
+  totalLeads = dedupeLeadsByMobile(totalLeads);
+
+  // "Closed" = leads whose CLOSE month (Lead Closer Date) is the selected
+  // month — independent of when they were generated. Matches the Combined
+  // Report exactly: any row with a close_month counts (no status check),
+  // and no deduplication (Combined Report doesn't dedup either).
+  var closedLeads = leads.filter(function (l) { return l.close_month === selectedMonth; });
+
+  if (!selectedMonth || (totalLeads.length === 0 && closedLeads.length === 0)) {
     container.innerHTML = '<p class="empty-note">No data for this month</p>';
     return;
   }
 
   // Group: TL name -> { total, closed, salesGroups: { salesName -> {total, closed} } }
   var tlGroups = {};
-  monthLeads.forEach(function (l) {
-    var isClosed = isClosedStatus(l.status_raw, type);
-    (l.team_leader_names || []).forEach(function (tlName) {
-      tlGroups[tlName] = tlGroups[tlName] || { total: 0, closed: 0, salesGroups: {} };
-      tlGroups[tlName].total++;
-      if (isClosed) tlGroups[tlName].closed++;
+  function ensureTl(tlName) {
+    tlGroups[tlName] = tlGroups[tlName] || { total: 0, closed: 0, salesGroups: {} };
+    return tlGroups[tlName];
+  }
+  function ensureSales(tlGroup, salesName) {
+    tlGroup.salesGroups[salesName] = tlGroup.salesGroups[salesName] || { total: 0, closed: 0 };
+    return tlGroup.salesGroups[salesName];
+  }
 
+  totalLeads.forEach(function (l) {
+    (l.team_leader_names || []).forEach(function (tlName) {
+      var tl = ensureTl(tlName);
+      tl.total++;
       (l.sales_names || []).forEach(function (salesName) {
-        var sg = tlGroups[tlName].salesGroups;
-        sg[salesName] = sg[salesName] || { total: 0, closed: 0 };
-        sg[salesName].total++;
-        if (isClosed) sg[salesName].closed++;
+        ensureSales(tl, salesName).total++;
+      });
+    });
+  });
+
+  closedLeads.forEach(function (l) {
+    (l.team_leader_names || []).forEach(function (tlName) {
+      var tl = ensureTl(tlName);
+      tl.closed++;
+      (l.sales_names || []).forEach(function (salesName) {
+        ensureSales(tl, salesName).closed++;
       });
     });
   });
