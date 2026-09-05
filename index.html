@@ -310,6 +310,8 @@
           <div class="fy-select-row">
             <label for="month-select-BB">Month</label>
             <select id="month-select-BB" onchange="renderTlSalesByMonth('BB')"></select>
+            <label for="tl-filter-BB" style="margin-left:14px;">Team Leader</label>
+            <select id="tl-filter-BB" onchange="renderTlSalesByMonth('BB')"><option value="">All Team Leaders</option></select>
           </div>
           <div id="tl-sales-by-month-BB"></div>
         </div>
@@ -458,6 +460,8 @@
           <div class="fy-select-row">
             <label for="month-select-CATV">Month</label>
             <select id="month-select-CATV" onchange="renderTlSalesByMonth('CATV')"></select>
+            <label for="tl-filter-CATV" style="margin-left:14px;">Team Leader</label>
+            <select id="tl-filter-CATV" onchange="renderTlSalesByMonth('CATV')"><option value="">All Team Leaders</option></select>
           </div>
           <div id="tl-sales-by-month-CATV"></div>
         </div>
@@ -1301,6 +1305,25 @@ function populateMonthSelect(type, leads) {
   } else if (monthList.length > 0) {
     select.value = monthList[monthList.length - 1]; // default to the most recent month
   }
+
+  populateTlFilterSelect(type, leads);
+}
+
+// Populates the Team Leader filter dropdown next to the Month selector on
+// the "Monthly TL / Sales Report" tab, from the sheet's own distinct
+// Team Leader values.
+function populateTlFilterSelect(type, leads) {
+  var tlSelect = document.getElementById('tl-filter-' + type);
+  if (!tlSelect) return;
+  var tlSet = {};
+  leads.forEach(function (l) {
+    (l.team_leader_names || []).forEach(function (n) { tlSet[n] = true; });
+  });
+  var tlList = Object.keys(tlSet).sort();
+  var previousValue = tlSelect.value;
+  tlSelect.innerHTML = '<option value="">All Team Leaders</option>' +
+    tlList.map(function (n) { return '<option value="' + n + '">' + n + '</option>'; }).join('');
+  if (tlList.indexOf(previousValue) !== -1) tlSelect.value = previousValue;
 }
 
 // Deduplicates leads by mobile number for the TL/Sales Breakup tab only
@@ -1338,6 +1361,8 @@ function dedupeLeadsByMobile(leads) {
 function renderTlSalesByMonth(type) {
   var select = document.getElementById('month-select-' + type);
   var selectedMonth = select.value;
+  var tlFilterSelect = document.getElementById('tl-filter-' + type);
+  var tlFilter = tlFilterSelect ? tlFilterSelect.value : '';
   var leads = LEADS_BY_TYPE[type] || [];
   var container = document.getElementById('tl-sales-by-month-' + type);
 
@@ -1353,6 +1378,13 @@ function renderTlSalesByMonth(type) {
   // Report exactly: any row with a close_month counts (no status check),
   // and no deduplication (Combined Report doesn't dedup either).
   var closedLeads = leads.filter(function (l) { return l.close_month === selectedMonth; });
+
+  // Team Leader filter — narrows both sets to leads belonging to the
+  // selected TL, if one is chosen.
+  if (tlFilter) {
+    totalLeads = totalLeads.filter(function (l) { return (l.team_leader_names || []).indexOf(tlFilter) !== -1; });
+    closedLeads = closedLeads.filter(function (l) { return (l.team_leader_names || []).indexOf(tlFilter) !== -1; });
+  }
 
   if (!selectedMonth || (totalLeads.length === 0 && closedLeads.length === 0)) {
     container.innerHTML = '<p class="empty-note">No data for this month</p>';
