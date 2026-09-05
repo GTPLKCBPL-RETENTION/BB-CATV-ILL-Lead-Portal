@@ -1537,7 +1537,7 @@ var FIELD_DEFS = {
     { label: "Pincode", header: "PINCODE", type: "text" },
     { label: "Address", header: "ADDRESS", type: "textarea" },
     { label: "Lead Status", header: "LEAD STATUS", type: "select", required: true,
-      options: ["Lead Close", "Not Interested/ Not Required", "Installation \u2013 Charges Inquiry",
+      options: ["New Lead", "Lead Close", "Not Interested/ Not Required", "Installation \u2013 Charges Inquiry",
                 "Existing Customer \u2013 BB", "The customer raised the inquiry incorrectly",
                 "Inquiry \u2013 Package Charges", "Call disconnected/No Response; 3 retries failed.",
                 "Out of Service Area in West Bengal", "Duplicate Entry", "Lead Lost to Competitor",
@@ -1561,7 +1561,7 @@ var FIELD_DEFS = {
     { label: "Pincode", header: "PINCODE", type: "text" },
     { label: "Address", header: "ADDRESS", type: "textarea" },
     { label: "Lead Status", header: "LEAD STATUS", type: "select", required: true,
-      options: ["Lead Close", "Lead Forwarded", "INVALID LEAD", "Not Interested/ Not Required",
+      options: ["New Lead", "Lead Close", "Lead Forwarded", "INVALID LEAD", "Not Interested/ Not Required",
                 "Out of Service Area in West Bengal", "Out of Service Area (Outside West Bengal)",
                 "Not Contactable By Sales/LCO", "Invalid / Incorrect Mobile Number",
                 "Duplicate Entry", "Inquiry \u2013 Package Charges"] },
@@ -1589,7 +1589,7 @@ var FIELD_DEFS = {
     { label: "RM Name", header: "ASSIGN  RM NAME", type: "select", required: true,
       options: ["Nikhil Jha", "Sudip Bose", "Ashok Pandey", "Tapas Dandapat", "Pritam Das", "Deblina Biswas"] },
     { label: "Lead Status", header: "LEAD STATUS", type: "select", required: true,
-      options: ["Hold From Customer End", "Feedback pending from Sales.", "Lead Close",
+      options: ["New Lead", "Hold From Customer End", "Feedback pending from Sales.", "Lead Close",
                 "Under Discussion with Sales", "Duplicate Entry", "Not Interested/ Not Required",
                 "Lead Lost to Competitor"] },
     { label: "Lead Close Month", header: "LEAD CLOSE MONTH", type: "text", skipOnAdd: true }
@@ -1979,7 +1979,7 @@ async function saveNewLead(type, fields, statusEl) {
 // Duplicate mobile numbers are flagged in the summary but still uploaded.
 // =============================================================================
 function downloadBulkTemplate(type) {
-  var fields = FIELD_DEFS[type].filter(function (f) { return !f.skipOnAdd; });
+  var fields = FIELD_DEFS[type]; // include every column (Sales, Team Leader, Followup Date, Sales Remarks, etc.)
   var headers = fields.map(function (f) { return f.label; });
   var ws = XLSX.utils.aoa_to_sheet([headers]);
   var wb = XLSX.utils.book_new();
@@ -2007,7 +2007,7 @@ function downloadBulkTemplate(type) {
 // Maps a template column label back to its FIELD_DEFS entry, for the
 // given sheet type.
 function getFieldByLabel(type, label) {
-  return FIELD_DEFS[type].filter(function (f) { return !f.skipOnAdd; })
+  return FIELD_DEFS[type]
     .filter(function (f) { return f.label.trim().toLowerCase() === String(label || '').trim().toLowerCase(); })[0];
 }
 
