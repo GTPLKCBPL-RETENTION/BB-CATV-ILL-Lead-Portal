@@ -697,7 +697,7 @@
 // CONFIG
 // =============================================================================
 // Paste your Google Apps Script Web App URL here (see Code.gs install steps).
-var API_BASE = "https://script.google.com/macros/s/AKfycbxT5AmUD3XTTY2tz5EpZZ_hSjxHnXUw_JqxCU-d07B3c1d80nBlt29w2m4cKn9eGpwwNw/exec";
+var API_BASE = "https://script.google.com/macros/s/AKfycby3qCrwzWvgSefRz3s8V8JpNQEYwh41DlkmLUl5aQpSoqy8lOiVUCOUcmYJCRJeL14g/exec";
 
 var DASHBOARD_PASSWORD = "GTPLKCBPL";
 
@@ -1888,7 +1888,9 @@ async function agentSubmitUpdate(type, cardId, sheetRowNumber) {
   statusEl.className = 'agent-status-msg info'; statusEl.textContent = 'Saving\u2026'; statusEl.style.display = 'block';
 
   try {
-    var data = await apiPost({ type: type, mobile: mobile, column: header, value: newValue });
+    // row is included so the backend updates ONLY this lead's row —
+    // important when the same mobile number has leads at other locations.
+    var data = await apiPost({ type: type, mobile: mobile, column: header, value: newValue, row: sheetRowNumber });
     if (data.success) {
       statusEl.className = 'agent-status-msg success';
       statusEl.textContent = 'Saved to the Google Sheet.';
