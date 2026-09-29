@@ -139,6 +139,12 @@
     background: #fff8e6; border: 1px solid #f0d896; color: #8a6a1a;
     padding: 10px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 20px;
   }
+  .loading-banner-text { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 6px; }
+  .loading-banner-pct { font-weight: 700; }
+  .loading-progress-track { background: #f4e5b4; border-radius: 6px; height: 6px; overflow: hidden; }
+  .loading-progress-fill { height: 100%; width: 0%; background: #b4791e; border-radius: 6px; transition: width 0.25s ease; }
+  .loading-banner.is-error { background: #fdecea; border-color: #f5c2bd; color: #b3261e; }
+  .loading-banner.is-error .loading-banner-pct, .loading-banner.is-error .loading-progress-track { display: none; }
 
   .agent-search-bar { display: flex; gap: 12px; align-items: flex-end; margin-bottom: 16px; }
   .agent-search-bar input[type=text] {
@@ -242,7 +248,10 @@
   </div>
 
   <main>
-    <div id="loading-banner" class="loading-banner" style="display:none;">Loading data&hellip;</div>
+    <div id="loading-banner" class="loading-banner" style="display:none;">
+      <div class="loading-banner-text"><span id="loading-banner-msg">Loading data&hellip;</span><span class="loading-banner-pct" id="loading-banner-pct">0%</span></div>
+      <div class="loading-progress-track"><div class="loading-progress-fill" id="loading-progress-fill"></div></div>
+    </div>
 
     <div id="sheet-panel-BB" class="sheet-panel">
       <div class="kpi-row">
@@ -784,16 +793,11 @@ function switchSheet(type) {
 
 // Combined Report needs all three sheets loaded — fetch whichever
 // haven't been loaded yet, then render.
-async function loadCombinedReport() {
-  var banner = document.getElementById('loading-banner');
-  var needed = SHEET_TYPES.filter(function (t) { return !LOADED_BY_TYPE[t]; });
+async function loadCombinedReport(fresh) {
+  // BB, CATV and ILL are fetched at the same time, not one after another.
+  var needed = SHEET_TYPES.filter(function (t) { return fresh || !LOADED_BY_TYPE[t]; });
   if (needed.length > 0) {
-    banner.style.display = 'block';
-    banner.textContent = 'Loading data for combined report\u2026';
-    for (var i = 0; i < needed.length; i++) {
-      await loadSheetData(needed[i]);
-    }
-    banner.style.display = 'none';
+    await Promise.all(needed.map(function (t) { return loadSheetData(t, fresh); }));
   }
   populateCombinedFySelect();
   renderCombinedReport();
@@ -811,8 +815,9 @@ function switchInnerTab(type, tabName) {
 // =============================================================================
 // DATA FETCH
 // =============================================================================
-async function apiGet(type) {
-  var res = await fetch(API_BASE + '?type=' + type);
+async function apiGet(type, fresh) {
+  // fresh = skip the server's 5-minute cache and read the sheet again (Refresh data)
+  var res = await fetch(API_BASE + '?type=' + type + (fresh ? '&fresh=1' : ''));
   return res.json();
 }
 
@@ -826,27 +831,87 @@ async function apiPost(payload) {
   return res.json();
 }
 
-async function loadSheetData(type) {
+// ---- Loading banner: one banner for every sheet being loaded, with a % ----
+// The Apps Script link does not say how much is left, so each sheet's % climbs
+// on its own towards 90% while waiting and jumps to 100% when its data arrives.
+// With several sheets loading, the banner shows their average.
+var LOAD_PCT = {};          // type -> % while that sheet is loading
+var LOAD_ERRORS = {};       // type -> message when that sheet failed
+var LOAD_PROMISE = {};      // type -> the fetch already running (never load a sheet twice at once)
+var loadTicker_ = null;
+
+function drawLoadingBanner_() {
   var banner = document.getElementById('loading-banner');
-  banner.style.display = 'block';
-  banner.textContent = 'Loading ' + type + ' data\u2026';
-  try {
-    var data = await apiGet(type);
-    LEADS_BY_TYPE[type] = data.leads || [];
-    LOADED_BY_TYPE[type] = true;
-    renderSheet(type);
-    banner.style.display = 'none';
-    document.getElementById('refresh-status').textContent = 'Last refreshed: ' + new Date().toLocaleTimeString();
-  } catch (err) {
+  var msgEl = document.getElementById('loading-banner-msg');
+  var pctEl = document.getElementById('loading-banner-pct');
+  var fillEl = document.getElementById('loading-progress-fill');
+  var loading = Object.keys(LOAD_PCT);
+  var failed = Object.keys(LOAD_ERRORS);
+  if (loading.length) {
+    var pct = loading.reduce(function (t, k) { return t + LOAD_PCT[k]; }, 0) / loading.length;
+    banner.classList.remove('is-error');
+    msgEl.textContent = 'Loading ' + loading.join(', ') + ' data\u2026';
+    pctEl.textContent = Math.round(pct) + '%';
+    fillEl.style.width = pct + '%';
     banner.style.display = 'block';
-    banner.textContent = 'Could not load ' + type + ' data. Check API_BASE and try Refresh data.';
-    console.error(err);
+  } else if (failed.length) {
+    banner.classList.add('is-error');
+    msgEl.textContent = failed.map(function (k) { return LOAD_ERRORS[k]; }).join(' ');
+    banner.style.display = 'block';
+  } else {
+    banner.style.display = 'none';
   }
+}
+function loadingStart_(type) {
+  delete LOAD_ERRORS[type];
+  LOAD_PCT[type] = 0;
+  if (!loadTicker_) {
+    loadTicker_ = setInterval(function () {
+      Object.keys(LOAD_PCT).forEach(function (k) {
+        if (LOAD_PCT[k] < 90) LOAD_PCT[k] = Math.min(90, LOAD_PCT[k] + Math.max(0.5, (90 - LOAD_PCT[k]) * 0.1));
+      });
+      drawLoadingBanner_();
+    }, 150);
+  }
+  drawLoadingBanner_();
+}
+function loadingEnd_(type, errorMessage) {
+  if (errorMessage) { delete LOAD_PCT[type]; LOAD_ERRORS[type] = errorMessage; }
+  else LOAD_PCT[type] = 100;
+  drawLoadingBanner_();
+  setTimeout(function () {
+    if (!errorMessage && LOAD_PCT[type] === 100) delete LOAD_PCT[type];   // a new load of the same sheet keeps its own %
+    if (!Object.keys(LOAD_PCT).length && loadTicker_) { clearInterval(loadTicker_); loadTicker_ = null; }
+    drawLoadingBanner_();
+  }, errorMessage ? 0 : 300);
+}
+
+function loadSheetData(type, fresh) {
+  if (LOAD_PROMISE[type]) return LOAD_PROMISE[type];   // already loading: wait for that one
+  LOAD_PROMISE[type] = (async function () {
+    loadingStart_(type);
+    try {
+      var data = await apiGet(type, fresh);
+      if (data && data.error && !(data.leads && data.leads.length)) throw new Error(data.error);
+      LEADS_BY_TYPE[type] = data.leads || [];
+      LOADED_BY_TYPE[type] = true;
+      renderSheet(type);
+      loadingEnd_(type);
+      document.getElementById('refresh-status').textContent = 'Last refreshed: ' + new Date().toLocaleTimeString();
+    } catch (err) {
+      loadingEnd_(type, 'Could not load ' + type + ' data' + (err && err.message ? ' (' + err.message + ')' : '') + '. Try Refresh data.');
+      console.error(err);
+    } finally {
+      delete LOAD_PROMISE[type];
+    }
+  })();
+  return LOAD_PROMISE[type];
 }
 
 async function refreshCurrentSheet() {
-  LOADED_BY_TYPE[CURRENT_SHEET] = false;
-  await loadSheetData(CURRENT_SHEET);
+  // Refresh data always reads the sheet again (skips the server cache)
+  if (CURRENT_SHEET === 'COMBINED') { await loadCombinedReport(true); return; }
+  await loadSheetData(CURRENT_SHEET, true);
 }
 
 // =============================================================================
