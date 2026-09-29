@@ -708,7 +708,7 @@
 // CONFIG
 // =============================================================================
 // Paste your Google Apps Script Web App URL here (see Code.gs install steps).
-var API_BASE = "https://script.google.com/macros/s/AKfycbw_8rpnhI2gnEmC2az1nQ7UUjEhzsmsjivbJBExqILU3GRQEESzYa-CMs0rmw3jQogNlw/exec";
+var API_BASE = "https://script.google.com/macros/s/AKfycby3qCrwzWvgSefRz3s8V8JpNQEYwh41DlkmLUl5aQpSoqy8lOiVUCOUcmYJCRJeL14g/exec";
 
 var DASHBOARD_PASSWORD = "GTPLKCBPL";
 
@@ -794,16 +794,13 @@ function switchSheet(type) {
 // Combined Report needs all three sheets loaded — fetch whichever
 // haven't been loaded yet, then render.
 async function loadCombinedReport(fresh) {
-  // One sheet after another, Broadband first, then CATV, then ILL.
-  // The report is drawn again after each sheet, so BB rows show first.
+  // BB, CATV and ILL are fetched at the same time, not one after another.
+  var needed = SHEET_TYPES.filter(function (t) { return fresh || !LOADED_BY_TYPE[t]; });
+  if (needed.length > 0) {
+    await Promise.all(needed.map(function (t) { return loadSheetData(t, fresh); }));
+  }
   populateCombinedFySelect();
   renderCombinedReport();
-  for (var i = 0; i < SHEET_TYPES.length; i++) {
-    var t = SHEET_TYPES[i];
-    if (!fresh && LOADED_BY_TYPE[t]) continue;
-    await loadSheetData(t, fresh);
-    if (CURRENT_SHEET === 'COMBINED') { populateCombinedFySelect(); renderCombinedReport(); }
-  }
 }
 
 function switchInnerTab(type, tabName) {
@@ -818,29 +815,25 @@ function switchInnerTab(type, tabName) {
 // =============================================================================
 // DATA FETCH
 // =============================================================================
-// fresh = skip the server's 5-minute cache and read the sheet again (Refresh data).
-// Google sometimes answers with an error page instead of the data (busy, or the
-// request never reached the script). Then it is asked again, up to 2 more times.
-var API_RETRY_WAIT_MS = [1500, 3000];
-var LEAD_PAGE_SIZE = 500;     // leads per part — small answers get through slow / strict networks
-async function apiGet(type, fresh, onRetry, extra) {
-  var lastErr = null;
-  for (var attempt = 0; attempt <= API_RETRY_WAIT_MS.length; attempt++) {
-    if (attempt > 0) {
-      if (onRetry) onRetry(attempt);
-      await new Promise(function (r) { setTimeout(r, API_RETRY_WAIT_MS[attempt - 1]); });
-    }
+async function apiGet(type, fresh) {
+  // fresh = skip the server cache and read the sheet again (Refresh data)
+  // 60 s timeout per try, up to 3 tries. If Apps Script returns an HTML error
+  // page instead of JSON (quota / access problem), a clear message is shown.
+  var url = API_BASE + '?type=' + type + (fresh ? '&fresh=1' : '');
+  var lastErr;
+  for (var attempt = 0; attempt < 3; attempt++) {
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, 60000);
     try {
-      var res = await fetch(API_BASE + '?type=' + type + (fresh ? '&fresh=1' : '') + (extra || ''));
+      var res = await fetch(url, { signal: ctrl.signal });
       var text = await res.text();
-      try {
-        return JSON.parse(text);
-      } catch (parseErr) {
-        var snippet = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
-        lastErr = new Error('Google returned an error page instead of data (server busy)' + (snippet ? ': "' + snippet + '"' : ''));
-      }
-    } catch (netErr) {
-      lastErr = new Error('network problem: ' + (netErr && netErr.message ? netErr.message : netErr));
+      clearTimeout(timer);
+      try { return JSON.parse(text); }
+      catch (parseErr) { throw new Error('Server did not return data (Apps Script quota or access problem)'); }
+    } catch (err) {
+      clearTimeout(timer);
+      lastErr = (err && err.name === 'AbortError') ? new Error('timed out') : err;
+      if (attempt < 2) await new Promise(function (r) { setTimeout(r, 1500 * (attempt + 1)); });
     }
   }
   throw lastErr;
@@ -853,7 +846,9 @@ async function apiPost(payload) {
     body: JSON.stringify(payload),
     redirect: 'follow'
   });
-  return res.json();
+  var text = await res.text();
+  try { return JSON.parse(text); }
+  catch (parseErr) { throw new Error('Server did not return data (Apps Script quota or access problem)'); }
 }
 
 // ---- Loading banner: one banner for every sheet being loaded, with a % ----
@@ -863,9 +858,6 @@ async function apiPost(payload) {
 var LOAD_PCT = {};          // type -> % while that sheet is loading
 var LOAD_ERRORS = {};       // type -> message when that sheet failed
 var LOAD_PROMISE = {};      // type -> the fetch already running (never load a sheet twice at once)
-var LOAD_RETRY = {};        // type -> retry number being tried
-var LOAD_PARTS = {};        // type -> { done, pages } while a sheet comes in parts
-var LOAD_CAP = {};          // type -> how far the waiting % may climb before the next part arrives
 var loadTicker_ = null;
 
 function drawLoadingBanner_() {
@@ -878,10 +870,7 @@ function drawLoadingBanner_() {
   if (loading.length) {
     var pct = loading.reduce(function (t, k) { return t + LOAD_PCT[k]; }, 0) / loading.length;
     banner.classList.remove('is-error');
-    msgEl.textContent = 'Loading ' + loading.map(function (k) {
-      var pt = LOAD_PARTS[k];
-      return k + (pt && pt.pages > 1 ? ' \u2014 ' + pt.done + ' / ' + pt.pages + ' parts' : '') + (LOAD_RETRY[k] ? ' (retry ' + LOAD_RETRY[k] + ')' : '');
-    }).join(', ') + ' data\u2026';
+    msgEl.textContent = 'Loading ' + loading.join(', ') + ' data\u2026';
     pctEl.textContent = Math.round(pct) + '%';
     fillEl.style.width = pct + '%';
     banner.style.display = 'block';
@@ -899,8 +888,7 @@ function loadingStart_(type) {
   if (!loadTicker_) {
     loadTicker_ = setInterval(function () {
       Object.keys(LOAD_PCT).forEach(function (k) {
-        var cap = LOAD_CAP[k] === undefined ? 90 : LOAD_CAP[k];
-        if (LOAD_PCT[k] < cap) LOAD_PCT[k] = Math.min(cap, LOAD_PCT[k] + Math.max(0.3, (cap - LOAD_PCT[k]) * 0.1));
+        if (LOAD_PCT[k] < 90) LOAD_PCT[k] = Math.min(90, LOAD_PCT[k] + Math.max(0.5, (90 - LOAD_PCT[k]) * 0.1));
       });
       drawLoadingBanner_();
     }, 150);
@@ -923,43 +911,18 @@ function loadSheetData(type, fresh) {
   LOAD_PROMISE[type] = (async function () {
     loadingStart_(type);
     try {
-      delete LOAD_RETRY[type];
-      var onRetry = function (n) { LOAD_RETRY[type] = n; drawLoadingBanner_(); };
-      // the sheet comes in parts of LEAD_PAGE_SIZE leads; the % follows the parts
-      var all = [], restarted = false, ver = '', pages = 1;
-      LOAD_CAP[type] = 15;                       // until the first part says how many parts there are
-      for (var pg = 0; pg < pages; pg++) {
-        var data = await apiGet(type, fresh && pg === 0, onRetry,
-          '&page=' + pg + '&size=' + LEAD_PAGE_SIZE + (ver ? '&ver=' + encodeURIComponent(ver) : ''));
-        delete LOAD_RETRY[type];
-        if (data && data.stale && !restarted) {  // the sheet changed in between — start again once
-          restarted = true; all = []; ver = ''; pages = 1; pg = -1; LOAD_PCT[type] = 0; LOAD_CAP[type] = 15;
-          continue;
-        }
-        if (data && data.error && !(data.leads && data.leads.length)) throw new Error(data.error);
-        all = all.concat(data.leads || []);
-        pages = data.pages || 1;                   // an old script without parts answers everything at once
-        ver = data.ver || ver;
-        LOAD_PARTS[type] = { done: pg + 1, pages: pages };
-        LOAD_PCT[type] = Math.max(LOAD_PCT[type] || 0, (pg + 1) / pages * 100 - (pg + 1 < pages ? 0 : 1));
-        LOAD_CAP[type] = Math.min(99, (pg + 2) / pages * 100 - 1);
-        drawLoadingBanner_();
-        if (!data.pages) break;
-      }
-      var data = { leads: all };
+      var data = await apiGet(type, fresh);
+      if (data && data.error && !(data.leads && data.leads.length)) throw new Error(data.error);
       LEADS_BY_TYPE[type] = data.leads || [];
       LOADED_BY_TYPE[type] = true;
       renderSheet(type);
       loadingEnd_(type);
       document.getElementById('refresh-status').textContent = 'Last refreshed: ' + new Date().toLocaleTimeString();
     } catch (err) {
-      loadingEnd_(type, type + ' could not load after 3 tries' + (err && err.message ? ' — ' + err.message : '') + '. Press Refresh data.');
+      loadingEnd_(type, 'Could not load ' + type + ' data' + (err && err.message ? ' (' + err.message + ')' : '') + '. Try Refresh data.');
       console.error(err);
     } finally {
       delete LOAD_PROMISE[type];
-      delete LOAD_RETRY[type];
-      delete LOAD_PARTS[type];
-      delete LOAD_CAP[type];
     }
   })();
   return LOAD_PROMISE[type];
