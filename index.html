@@ -4,8 +4,6 @@
 <meta charset="UTF-8">
 <title>BB / CATV / ILL Lead Management Portal</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" type="image/png" href="https://gtplkcbpl-retention.github.io/Lead-Management-Dashboard/logo.png.png">
-<link rel="apple-touch-icon" href="https://gtplkcbpl-retention.github.io/Lead-Management-Dashboard/logo.png.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root {
@@ -139,12 +137,6 @@
     background: #fff8e6; border: 1px solid #f0d896; color: #8a6a1a;
     padding: 10px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 20px;
   }
-  .loading-banner-text { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 6px; }
-  .loading-banner-pct { font-weight: 700; }
-  .loading-progress-track { background: #f4e5b4; border-radius: 6px; height: 6px; overflow: hidden; }
-  .loading-progress-fill { height: 100%; width: 0%; background: #b4791e; border-radius: 6px; transition: width 0.25s ease; }
-  .loading-banner.is-error { background: #fdecea; border-color: #f5c2bd; color: #b3261e; }
-  .loading-banner.is-error .loading-banner-pct, .loading-banner.is-error .loading-progress-track { display: none; }
 
   .agent-search-bar { display: flex; gap: 12px; align-items: flex-end; margin-bottom: 16px; }
   .agent-search-bar input[type=text] {
@@ -212,7 +204,7 @@
 
 <div id="login-screen">
   <div class="card">
-    <img src="https://gtplkcbpl-retention.github.io/Lead-Management-Dashboard/logo.png.png" alt="GTPL KCBPL logo" style="height:48px; width:auto; margin-bottom:16px; border-radius:4px;" onerror="this.style.display='none'">
+    <img src="https://raw.githubusercontent.com/GTPLKCBPL-RETENTION/-Lead-validation-portal/main/logo.png" alt="GTPL KCBPL logo" style="height:48px; width:auto; margin-bottom:16px; border-radius:4px;">
     <h1>BB / CATV / ILL Lead Portal</h1>
     <p class="sub">GTPL KCBPL &mdash; Lead Management</p>
     <div id="login-error">Incorrect password. Please try again.</div>
@@ -227,7 +219,7 @@
 <div id="dashboard-screen" style="display:none;">
   <header>
     <div style="display:flex; align-items:center; gap:14px;">
-      <img src="https://gtplkcbpl-retention.github.io/Lead-Management-Dashboard/logo.png.png" alt="GTPL KCBPL logo" style="height:40px; width:auto; border-radius:4px;" onerror="this.style.display='none'">
+      <img src="https://raw.githubusercontent.com/GTPLKCBPL-RETENTION/-Lead-validation-portal/main/logo.png" alt="GTPL KCBPL logo" style="height:40px; width:auto; border-radius:4px;">
       <div>
         <h1>BB / CATV / ILL Lead Portal</h1>
         <div class="sub">GTPL KCBPL &mdash; Lead Management</div>
@@ -248,10 +240,7 @@
   </div>
 
   <main>
-    <div id="loading-banner" class="loading-banner" style="display:none;">
-      <div class="loading-banner-text"><span id="loading-banner-msg">Loading data&hellip;</span><span class="loading-banner-pct" id="loading-banner-pct">0%</span></div>
-      <div class="loading-progress-track"><div class="loading-progress-fill" id="loading-progress-fill"></div></div>
-    </div>
+    <div id="loading-banner" class="loading-banner" style="display:none;">Loading data&hellip;</div>
 
     <div id="sheet-panel-BB" class="sheet-panel">
       <div class="kpi-row">
@@ -708,7 +697,7 @@
 // CONFIG
 // =============================================================================
 // Paste your Google Apps Script Web App URL here (see Code.gs install steps).
-var API_BASE = "https://script.google.com/macros/s/AKfycbzH8Fab534mXUr26lAquUozVdn5Tqzy0QidCgNt7CjcWjpD4OAGyMPapsdykkPeMiU9tg/exec";
+var API_BASE = "https://script.google.com/macros/s/AKfycbzwxVouMl9bUWEroQB-2Tj87dMQwJlt1Q8mCV-VVevk8CzWX6C6k7woK42aM7CJjUpZUg/exec";
 
 var DASHBOARD_PASSWORD = "GTPLKCBPL";
 
@@ -793,17 +782,19 @@ function switchSheet(type) {
 
 // Combined Report needs all three sheets loaded — fetch whichever
 // haven't been loaded yet, then render.
-async function loadCombinedReport(fresh) {
-  // One sheet after another, Broadband first, then CATV, then ILL.
-  // The report is drawn again after each sheet, so BB rows show first.
+async function loadCombinedReport() {
+  var banner = document.getElementById('loading-banner');
+  var needed = SHEET_TYPES.filter(function (t) { return !LOADED_BY_TYPE[t]; });
+  if (needed.length > 0) {
+    banner.style.display = 'block';
+    banner.textContent = 'Loading data for combined report\u2026';
+    for (var i = 0; i < needed.length; i++) {
+      await loadSheetData(needed[i]);
+    }
+    banner.style.display = 'none';
+  }
   populateCombinedFySelect();
   renderCombinedReport();
-  for (var i = 0; i < SHEET_TYPES.length; i++) {
-    var t = SHEET_TYPES[i];
-    if (!fresh && LOADED_BY_TYPE[t]) continue;
-    await loadSheetData(t, fresh);
-    if (CURRENT_SHEET === 'COMBINED') { populateCombinedFySelect(); renderCombinedReport(); }
-  }
 }
 
 function switchInnerTab(type, tabName) {
@@ -818,32 +809,9 @@ function switchInnerTab(type, tabName) {
 // =============================================================================
 // DATA FETCH
 // =============================================================================
-// fresh = skip the server's 5-minute cache and read the sheet again (Refresh data).
-// Google sometimes answers with an error page instead of the data (busy, or the
-// request never reached the script). Then it is asked again, up to 2 more times.
-var API_RETRY_WAIT_MS = [1500, 3000];
-var LEAD_PAGE_SIZE = 500;     // leads per part — small answers get through slow / strict networks
-async function apiGet(type, fresh, onRetry, extra) {
-  var lastErr = null;
-  for (var attempt = 0; attempt <= API_RETRY_WAIT_MS.length; attempt++) {
-    if (attempt > 0) {
-      if (onRetry) onRetry(attempt);
-      await new Promise(function (r) { setTimeout(r, API_RETRY_WAIT_MS[attempt - 1]); });
-    }
-    try {
-      var res = await fetch(API_BASE + '?type=' + type + (fresh ? '&fresh=1' : '') + (extra || ''));
-      var text = await res.text();
-      try {
-        return JSON.parse(text);
-      } catch (parseErr) {
-        var snippet = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
-        lastErr = new Error('Google returned an error page instead of data (server busy)' + (snippet ? ': "' + snippet + '"' : ''));
-      }
-    } catch (netErr) {
-      lastErr = new Error('network problem: ' + (netErr && netErr.message ? netErr.message : netErr));
-    }
-  }
-  throw lastErr;
+async function apiGet(type) {
+  var res = await fetch(API_BASE + '?type=' + type);
+  return res.json();
 }
 
 async function apiPost(payload) {
@@ -856,119 +824,27 @@ async function apiPost(payload) {
   return res.json();
 }
 
-// ---- Loading banner: one banner for every sheet being loaded, with a % ----
-// The Apps Script link does not say how much is left, so each sheet's % climbs
-// on its own towards 90% while waiting and jumps to 100% when its data arrives.
-// With several sheets loading, the banner shows their average.
-var LOAD_PCT = {};          // type -> % while that sheet is loading
-var LOAD_ERRORS = {};       // type -> message when that sheet failed
-var LOAD_PROMISE = {};      // type -> the fetch already running (never load a sheet twice at once)
-var LOAD_RETRY = {};        // type -> retry number being tried
-var LOAD_PARTS = {};        // type -> { done, pages } while a sheet comes in parts
-var LOAD_CAP = {};          // type -> how far the waiting % may climb before the next part arrives
-var loadTicker_ = null;
-
-function drawLoadingBanner_() {
+async function loadSheetData(type) {
   var banner = document.getElementById('loading-banner');
-  var msgEl = document.getElementById('loading-banner-msg');
-  var pctEl = document.getElementById('loading-banner-pct');
-  var fillEl = document.getElementById('loading-progress-fill');
-  var loading = Object.keys(LOAD_PCT);
-  var failed = Object.keys(LOAD_ERRORS);
-  if (loading.length) {
-    var pct = loading.reduce(function (t, k) { return t + LOAD_PCT[k]; }, 0) / loading.length;
-    banner.classList.remove('is-error');
-    msgEl.textContent = 'Loading ' + loading.map(function (k) {
-      var pt = LOAD_PARTS[k];
-      return k + (pt && pt.pages > 1 ? ' \u2014 ' + pt.done + ' / ' + pt.pages + ' parts' : '') + (LOAD_RETRY[k] ? ' (retry ' + LOAD_RETRY[k] + ')' : '');
-    }).join(', ') + ' data\u2026';
-    pctEl.textContent = Math.round(pct) + '%';
-    fillEl.style.width = pct + '%';
-    banner.style.display = 'block';
-  } else if (failed.length) {
-    banner.classList.add('is-error');
-    msgEl.textContent = failed.map(function (k) { return LOAD_ERRORS[k]; }).join(' ');
-    banner.style.display = 'block';
-  } else {
+  banner.style.display = 'block';
+  banner.textContent = 'Loading ' + type + ' data\u2026';
+  try {
+    var data = await apiGet(type);
+    LEADS_BY_TYPE[type] = data.leads || [];
+    LOADED_BY_TYPE[type] = true;
+    renderSheet(type);
     banner.style.display = 'none';
+    document.getElementById('refresh-status').textContent = 'Last refreshed: ' + new Date().toLocaleTimeString();
+  } catch (err) {
+    banner.style.display = 'block';
+    banner.textContent = 'Could not load ' + type + ' data. Check API_BASE and try Refresh data.';
+    console.error(err);
   }
-}
-function loadingStart_(type) {
-  delete LOAD_ERRORS[type];
-  LOAD_PCT[type] = 0;
-  if (!loadTicker_) {
-    loadTicker_ = setInterval(function () {
-      Object.keys(LOAD_PCT).forEach(function (k) {
-        var cap = LOAD_CAP[k] === undefined ? 90 : LOAD_CAP[k];
-        if (LOAD_PCT[k] < cap) LOAD_PCT[k] = Math.min(cap, LOAD_PCT[k] + Math.max(0.3, (cap - LOAD_PCT[k]) * 0.1));
-      });
-      drawLoadingBanner_();
-    }, 150);
-  }
-  drawLoadingBanner_();
-}
-function loadingEnd_(type, errorMessage) {
-  if (errorMessage) { delete LOAD_PCT[type]; LOAD_ERRORS[type] = errorMessage; }
-  else LOAD_PCT[type] = 100;
-  drawLoadingBanner_();
-  setTimeout(function () {
-    if (!errorMessage && LOAD_PCT[type] === 100) delete LOAD_PCT[type];   // a new load of the same sheet keeps its own %
-    if (!Object.keys(LOAD_PCT).length && loadTicker_) { clearInterval(loadTicker_); loadTicker_ = null; }
-    drawLoadingBanner_();
-  }, errorMessage ? 0 : 300);
-}
-
-function loadSheetData(type, fresh) {
-  if (LOAD_PROMISE[type]) return LOAD_PROMISE[type];   // already loading: wait for that one
-  LOAD_PROMISE[type] = (async function () {
-    loadingStart_(type);
-    try {
-      delete LOAD_RETRY[type];
-      var onRetry = function (n) { LOAD_RETRY[type] = n; drawLoadingBanner_(); };
-      // the sheet comes in parts of LEAD_PAGE_SIZE leads; the % follows the parts
-      var all = [], restarted = false, ver = '', pages = 1;
-      LOAD_CAP[type] = 15;                       // until the first part says how many parts there are
-      for (var pg = 0; pg < pages; pg++) {
-        var data = await apiGet(type, fresh && pg === 0, onRetry,
-          '&page=' + pg + '&size=' + LEAD_PAGE_SIZE + (ver ? '&ver=' + encodeURIComponent(ver) : ''));
-        delete LOAD_RETRY[type];
-        if (data && data.stale && !restarted) {  // the sheet changed in between — start again once
-          restarted = true; all = []; ver = ''; pages = 1; pg = -1; LOAD_PCT[type] = 0; LOAD_CAP[type] = 15;
-          continue;
-        }
-        if (data && data.error && !(data.leads && data.leads.length)) throw new Error(data.error);
-        all = all.concat(data.leads || []);
-        pages = data.pages || 1;                   // an old script without parts answers everything at once
-        ver = data.ver || ver;
-        LOAD_PARTS[type] = { done: pg + 1, pages: pages };
-        LOAD_PCT[type] = Math.max(LOAD_PCT[type] || 0, (pg + 1) / pages * 100 - (pg + 1 < pages ? 0 : 1));
-        LOAD_CAP[type] = Math.min(99, (pg + 2) / pages * 100 - 1);
-        drawLoadingBanner_();
-        if (!data.pages) break;
-      }
-      var data = { leads: all };
-      LEADS_BY_TYPE[type] = data.leads || [];
-      LOADED_BY_TYPE[type] = true;
-      renderSheet(type);
-      loadingEnd_(type);
-      document.getElementById('refresh-status').textContent = 'Last refreshed: ' + new Date().toLocaleTimeString();
-    } catch (err) {
-      loadingEnd_(type, type + ' could not load after 3 tries' + (err && err.message ? ' — ' + err.message : '') + '. Press Refresh data.');
-      console.error(err);
-    } finally {
-      delete LOAD_PROMISE[type];
-      delete LOAD_RETRY[type];
-      delete LOAD_PARTS[type];
-      delete LOAD_CAP[type];
-    }
-  })();
-  return LOAD_PROMISE[type];
 }
 
 async function refreshCurrentSheet() {
-  // Refresh data always reads the sheet again (skips the server cache)
-  if (CURRENT_SHEET === 'COMBINED') { await loadCombinedReport(true); return; }
-  await loadSheetData(CURRENT_SHEET, true);
+  LOADED_BY_TYPE[CURRENT_SHEET] = false;
+  await loadSheetData(CURRENT_SHEET);
 }
 
 // =============================================================================
