@@ -708,7 +708,7 @@
 // CONFIG
 // =============================================================================
 // Paste your Google Apps Script Web App URL here (see Code.gs install steps).
-var API_BASE = "https://script.google.com/macros/s/AKfycby3qCrwzWvgSefRz3s8V8JpNQEYwh41DlkmLUl5aQpSoqy8lOiVUCOUcmYJCRJeL14g/exec";
+var API_BASE = "https://script.google.com/macros/s/AKfycbzwjlIsL5c7DtU7HCngMrGG6MHVzR8Kjxwl9Dsq36EFTxYAB4HmWsIAdLdF2tFLlp7OvA/exec";
 
 var DASHBOARD_PASSWORD = "GTPLKCBPL";
 
@@ -797,7 +797,10 @@ async function loadCombinedReport(fresh) {
   // BB, CATV and ILL are fetched at the same time, not one after another.
   var needed = SHEET_TYPES.filter(function (t) { return fresh || !LOADED_BY_TYPE[t]; });
   if (needed.length > 0) {
-    await Promise.all(needed.map(function (t) { return loadSheetData(t, fresh); }));
+    // started 0.4 s apart so Google is not hit by all three at the same moment
+    await Promise.all(needed.map(function (t, i) {
+      return new Promise(function (r) { setTimeout(r, i * 400); }).then(function () { return loadSheetData(t, fresh); });
+    }));
   }
   populateCombinedFySelect();
   renderCombinedReport();
@@ -815,10 +818,31 @@ function switchInnerTab(type, tabName) {
 // =============================================================================
 // DATA FETCH
 // =============================================================================
-async function apiGet(type, fresh) {
-  // fresh = skip the server's 5-minute cache and read the sheet again (Refresh data)
-  var res = await fetch(API_BASE + '?type=' + type + (fresh ? '&fresh=1' : ''));
-  return res.json();
+// fresh = skip the server's 5-minute cache and read the sheet again (Refresh data).
+// Google sometimes answers with an error page instead of the data (busy, or the
+// request never reached the script). Then it is asked again, up to 2 more times.
+var API_RETRY_WAIT_MS = [1500, 3000];
+async function apiGet(type, fresh, onRetry) {
+  var lastErr = null;
+  for (var attempt = 0; attempt <= API_RETRY_WAIT_MS.length; attempt++) {
+    if (attempt > 0) {
+      if (onRetry) onRetry(attempt);
+      await new Promise(function (r) { setTimeout(r, API_RETRY_WAIT_MS[attempt - 1]); });
+    }
+    try {
+      var res = await fetch(API_BASE + '?type=' + type + (fresh ? '&fresh=1' : ''));
+      var text = await res.text();
+      try {
+        return JSON.parse(text);
+      } catch (parseErr) {
+        var snippet = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+        lastErr = new Error('Google returned an error page instead of data (server busy)' + (snippet ? ': "' + snippet + '"' : ''));
+      }
+    } catch (netErr) {
+      lastErr = new Error('network problem: ' + (netErr && netErr.message ? netErr.message : netErr));
+    }
+  }
+  throw lastErr;
 }
 
 async function apiPost(payload) {
@@ -838,6 +862,7 @@ async function apiPost(payload) {
 var LOAD_PCT = {};          // type -> % while that sheet is loading
 var LOAD_ERRORS = {};       // type -> message when that sheet failed
 var LOAD_PROMISE = {};      // type -> the fetch already running (never load a sheet twice at once)
+var LOAD_RETRY = {};        // type -> retry number being tried
 var loadTicker_ = null;
 
 function drawLoadingBanner_() {
@@ -850,7 +875,7 @@ function drawLoadingBanner_() {
   if (loading.length) {
     var pct = loading.reduce(function (t, k) { return t + LOAD_PCT[k]; }, 0) / loading.length;
     banner.classList.remove('is-error');
-    msgEl.textContent = 'Loading ' + loading.join(', ') + ' data\u2026';
+    msgEl.textContent = 'Loading ' + loading.map(function (k) { return LOAD_RETRY[k] ? k + ' (retry ' + LOAD_RETRY[k] + ')' : k; }).join(', ') + ' data\u2026';
     pctEl.textContent = Math.round(pct) + '%';
     fillEl.style.width = pct + '%';
     banner.style.display = 'block';
@@ -891,7 +916,8 @@ function loadSheetData(type, fresh) {
   LOAD_PROMISE[type] = (async function () {
     loadingStart_(type);
     try {
-      var data = await apiGet(type, fresh);
+      delete LOAD_RETRY[type];
+      var data = await apiGet(type, fresh, function (n) { LOAD_RETRY[type] = n; drawLoadingBanner_(); });
       if (data && data.error && !(data.leads && data.leads.length)) throw new Error(data.error);
       LEADS_BY_TYPE[type] = data.leads || [];
       LOADED_BY_TYPE[type] = true;
@@ -899,10 +925,11 @@ function loadSheetData(type, fresh) {
       loadingEnd_(type);
       document.getElementById('refresh-status').textContent = 'Last refreshed: ' + new Date().toLocaleTimeString();
     } catch (err) {
-      loadingEnd_(type, 'Could not load ' + type + ' data' + (err && err.message ? ' (' + err.message + ')' : '') + '. Try Refresh data.');
+      loadingEnd_(type, type + ' could not load after 3 tries' + (err && err.message ? ' — ' + err.message : '') + '. Press Refresh data.');
       console.error(err);
     } finally {
       delete LOAD_PROMISE[type];
+      delete LOAD_RETRY[type];
     }
   })();
   return LOAD_PROMISE[type];
