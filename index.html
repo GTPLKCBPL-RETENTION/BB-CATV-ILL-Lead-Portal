@@ -245,6 +245,7 @@
     <button class="sheet-nav-btn" data-sheet="BB" onclick="switchSheet('BB')">Broadband (BB)</button>
     <button class="sheet-nav-btn" data-sheet="CATV" onclick="switchSheet('CATV')">CATV</button>
     <button class="sheet-nav-btn" data-sheet="ILL" onclick="switchSheet('ILL')">ILL / Corporate BB</button>
+    <button class="sheet-nav-btn" id="sheet-nav-download" data-sheet="DOWNLOAD" onclick="switchSheet('DOWNLOAD')" style="display:none;">Download Data</button>
   </div>
 
   <main>
@@ -700,6 +701,22 @@
         </table>
       </div>
     </div>
+
+    <div id="sheet-panel-DOWNLOAD" class="sheet-panel">
+      <div class="panel">
+        <h2>Download month-wise data</h2>
+        <p class="note">
+          Select a month (by lead date) and download all its leads as an Excel file. The file has one tab each for
+          Broadband (BB), CATV and ILL / Corporate BB. Only visible to TL login.
+        </p>
+        <div class="fy-select-row">
+          <label for="dl-month">Month</label>
+          <select id="dl-month" onchange="updateDownloadInfo_()"></select>
+          <button class="primary-btn" id="dl-btn" onclick="downloadMonthExcel()">Download Excel</button>
+        </div>
+        <div id="dl-info" style="font-size:13px; color:#445;"></div>
+      </div>
+    </div>
   </main>
 </div>
 
@@ -708,9 +725,14 @@
 // CONFIG
 // =============================================================================
 // Paste your Google Apps Script Web App URL here (see Code.gs install steps).
-var API_BASE = "https://script.google.com/macros/s/AKfycbw_8rpnhI2gnEmC2az1nQ7UUjEhzsmsjivbJBExqILU3GRQEESzYa-CMs0rmw3jQogNlw/exec";
+var API_BASE = "https://script.google.com/macros/s/AKfycby3qCrwzWvgSefRz3s8V8JpNQEYwh41DlkmLUl5aQpSoqy8lOiVUCOUcmYJCRJeL14g/exec";
 
 var DASHBOARD_PASSWORD = "GTPLKCBPL";
+
+// TL (Team Leader) password — logging in with this unlocks the
+// "Download Data" tab. CHANGE THIS to your own TL password.
+var TL_PASSWORD = "TL@GTPLKCBPL";
+var CURRENT_ROLE = 'agent'; // 'agent' or 'tl' — set at login
 
 // =============================================================================
 // STATE
@@ -751,8 +773,9 @@ function fyMonthKey(yyyyMm) {
 document.getElementById('login-form').addEventListener('submit', function (e) {
   e.preventDefault();
   var pwd = document.getElementById('password').value;
-  if (pwd === DASHBOARD_PASSWORD) {
+  if (pwd === DASHBOARD_PASSWORD || pwd === TL_PASSWORD) {
     sessionStorage.setItem('portal_logged_in', '1');
+    sessionStorage.setItem('portal_role', pwd === TL_PASSWORD ? 'tl' : 'agent');
     showDashboard();
   } else {
     document.getElementById('login-error').style.display = 'block';
@@ -761,11 +784,22 @@ document.getElementById('login-form').addEventListener('submit', function (e) {
 
 function logout() {
   sessionStorage.removeItem('portal_logged_in');
+  sessionStorage.removeItem('portal_role');
+  CURRENT_ROLE = 'agent';
+  applyRole_();
+  document.getElementById('password').value = '';
   document.getElementById('dashboard-screen').style.display = 'none';
   document.getElementById('login-screen').style.display = 'flex';
 }
 
+function applyRole_() {
+  CURRENT_ROLE = sessionStorage.getItem('portal_role') === 'tl' ? 'tl' : 'agent';
+  var b = document.getElementById('sheet-nav-download');
+  if (b) b.style.display = (CURRENT_ROLE === 'tl') ? '' : 'none';
+}
+
 function showDashboard() {
+  applyRole_();
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('dashboard-screen').style.display = 'block';
   switchSheet('COMBINED');
@@ -775,6 +809,7 @@ function showDashboard() {
 // SHEET / TAB SWITCHING
 // =============================================================================
 function switchSheet(type) {
+  if (type === 'DOWNLOAD' && CURRENT_ROLE !== 'tl') type = 'COMBINED';
   CURRENT_SHEET = type;
   document.querySelectorAll('.sheet-nav-btn').forEach(function (b) { b.classList.remove('active'); });
   document.querySelector('.sheet-nav-btn[data-sheet="' + type + '"]').classList.add('active');
@@ -783,6 +818,10 @@ function switchSheet(type) {
 
   if (type === 'COMBINED') {
     loadCombinedReport();
+    return;
+  }
+  if (type === 'DOWNLOAD') {
+    loadDownloadTab_();
     return;
   }
 
@@ -816,27 +855,9 @@ function switchInnerTab(type, tabName) {
 // DATA FETCH
 // =============================================================================
 async function apiGet(type, fresh) {
-  // fresh = skip the server cache and read the sheet again (Refresh data)
-  // 60 s timeout per try, up to 3 tries. If Apps Script returns an HTML error
-  // page instead of JSON (quota / access problem), a clear message is shown.
-  var url = API_BASE + '?type=' + type + (fresh ? '&fresh=1' : '');
-  var lastErr;
-  for (var attempt = 0; attempt < 3; attempt++) {
-    var ctrl = new AbortController();
-    var timer = setTimeout(function () { ctrl.abort(); }, 60000);
-    try {
-      var res = await fetch(url, { signal: ctrl.signal });
-      var text = await res.text();
-      clearTimeout(timer);
-      try { return JSON.parse(text); }
-      catch (parseErr) { throw new Error('Server did not return data (Apps Script quota or access problem)'); }
-    } catch (err) {
-      clearTimeout(timer);
-      lastErr = (err && err.name === 'AbortError') ? new Error('timed out') : err;
-      if (attempt < 2) await new Promise(function (r) { setTimeout(r, 1500 * (attempt + 1)); });
-    }
-  }
-  throw lastErr;
+  // fresh = skip the server's 5-minute cache and read the sheet again (Refresh data)
+  var res = await fetch(API_BASE + '?type=' + type + (fresh ? '&fresh=1' : ''));
+  return res.json();
 }
 
 async function apiPost(payload) {
@@ -846,9 +867,7 @@ async function apiPost(payload) {
     body: JSON.stringify(payload),
     redirect: 'follow'
   });
-  var text = await res.text();
-  try { return JSON.parse(text); }
-  catch (parseErr) { throw new Error('Server did not return data (Apps Script quota or access problem)'); }
+  return res.json();
 }
 
 // ---- Loading banner: one banner for every sheet being loaded, with a % ----
@@ -931,6 +950,7 @@ function loadSheetData(type, fresh) {
 async function refreshCurrentSheet() {
   // Refresh data always reads the sheet again (skips the server cache)
   if (CURRENT_SHEET === 'COMBINED') { await loadCombinedReport(true); return; }
+  if (CURRENT_SHEET === 'DOWNLOAD') { await loadDownloadTab_(true); return; }
   await loadSheetData(CURRENT_SHEET, true);
 }
 
@@ -2295,6 +2315,111 @@ function showDuplicateMobileModal(onContinue) {
   document.body.appendChild(overlay);
   overlay.querySelector('[data-role="cancel"]').addEventListener('click', function () { document.body.removeChild(overlay); });
   overlay.querySelector('[data-role="continue"]').addEventListener('click', function () { document.body.removeChild(overlay); onContinue(); });
+}
+
+// =============================================================================
+// DOWNLOAD DATA (TL only) — month-wise Excel with one tab per sheet
+// (BB, CATV, ILL). Built in the browser from the already-loaded leads.
+// =============================================================================
+var DL_SHEETS = [
+  { type: 'BB', tab: 'Broadband (BB)', cols: [
+    ['Lead Date','lead_gen_date'],['Customer Name','customer_name'],['Mobile No','mobile'],['Pincode','pincode'],
+    ['Address','address'],['Lead Source','lead_source'],['Type of Connection','connection_type'],
+    ['Lead Status','status_raw'],['Sales','sales_names'],['Team Leader','team_leader_names'],
+    ['Close Month','close_month'],['Agent Remarks','agent_remarks'],['Sales Remarks','sales_remarks'],
+    ['Follow Up Date','followup_date_raw'],['LBO / LCO','lbo_lco'],['Zone Code','zone_code'],
+    ['Plan Name','plan_name'],['Price','price'],['ONU','onu'] ] },
+  { type: 'CATV', tab: 'CATV', cols: [
+    ['Lead Date','lead_gen_date'],['Customer Name','customer_name'],['Mobile No','mobile'],['Pincode','pincode'],
+    ['Address','address'],['Lead Source','lead_source'],['Type of Connection','connection_type'],
+    ['Lead Status','status_raw'],['Sales','sales_names'],['Team Leader','team_leader_names'],
+    ['Close Month','close_month'],['Agent Remarks','agent_remarks'] ] },
+  { type: 'ILL', tab: 'ILL - Corporate BB', cols: [
+    ['Lead Date','lead_gen_date'],['Lead Source','lead_source'],['Company Name & Address','company'],
+    ['Type of Connection','connection_type'],['Speed / Bandwidth','speed'],['Price','price'],
+    ['Contact Person','contact_person'],['Mobile No','mobile'],['Pincode','pincode'],
+    ['RM Name','rm_names'],['Lead Status','status_raw'],['Close Month','close_month'],
+    ['Remarks','remarks'],['Agent Remarks','agent_remarks'] ] }
+];
+
+async function loadDownloadTab_(fresh) {
+  var needed = SHEET_TYPES.filter(function (t) { return fresh || !LOADED_BY_TYPE[t]; });
+  var info = document.getElementById('dl-info');
+  if (needed.length > 0) {
+    if (info) info.textContent = 'Loading data\u2026';
+    await Promise.all(needed.map(function (t) { return loadSheetData(t, fresh); }));
+  }
+  populateDownloadMonths_();
+}
+
+function dlMonthLabel_(ym) {
+  var p = String(ym).split('-');
+  return (MONTH_NUM_TO_NAME[p[1]] || p[1]) + ' ' + p[0];
+}
+
+function populateDownloadMonths_() {
+  var sel = document.getElementById('dl-month');
+  if (!sel) return;
+  var prev = sel.value;
+  var set = {};
+  SHEET_TYPES.forEach(function (t) {
+    LEADS_BY_TYPE[t].forEach(function (l) { if (l.lead_gen_month) set[l.lead_gen_month] = true; });
+  });
+  var months = Object.keys(set).sort().reverse(); // newest first
+  var html = '<option value="__all__">All months</option>';
+  months.forEach(function (m) { html += '<option value="' + m + '">' + dlMonthLabel_(m) + '</option>'; });
+  sel.innerHTML = html;
+  if (prev && (prev === '__all__' || set[prev])) sel.value = prev;
+  else if (months.length) sel.value = months[0];
+  updateDownloadInfo_();
+}
+
+function dlLeadsFor_(type) {
+  var month = document.getElementById('dl-month').value;
+  var leads = LEADS_BY_TYPE[type] || [];
+  if (month === '__all__') return leads;
+  return leads.filter(function (l) { return l.lead_gen_month === month; });
+}
+
+function updateDownloadInfo_() {
+  var el = document.getElementById('dl-info');
+  if (!el) return;
+  var parts = DL_SHEETS.map(function (d) {
+    return d.tab + ': ' + dlLeadsFor_(d.type).length.toLocaleString('en-IN');
+  });
+  el.textContent = 'Leads in this selection \u2014 ' + parts.join(' | ');
+}
+
+function dlCell_(v) {
+  if (v === null || v === undefined) return '';
+  if (Array.isArray(v)) return v.join(' / ');
+  return v;
+}
+
+function downloadMonthExcel() {
+  if (CURRENT_ROLE !== 'tl') return; // safety: TL only
+  var wb = XLSX.utils.book_new();
+  var added = 0;
+  DL_SHEETS.forEach(function (d) {
+    var leads = dlLeadsFor_(d.type);
+    if (!leads.length) return;
+    var rows = [d.cols.map(function (c) { return c[0]; })];
+    leads.forEach(function (l) {
+      rows.push(d.cols.map(function (c) {
+        var v = dlCell_(l[c[1]]);
+        // keep phone / pincode as text so Excel does not turn them into 9.8E+09
+        if ((c[1] === 'mobile' || c[1] === 'pincode') && v !== '') v = String(v);
+        return v;
+      }));
+    });
+    var ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = d.cols.map(function (c) { return { wch: Math.max(14, c[0].length + 4) }; });
+    XLSX.utils.book_append_sheet(wb, ws, d.tab);
+    added++;
+  });
+  if (!added) { alert('No leads found for the selected month.'); return; }
+  var month = document.getElementById('dl-month').value;
+  XLSX.writeFile(wb, 'leads_' + (month === '__all__' ? 'all-months' : month) + '.xlsx');
 }
 
 // =============================================================================
