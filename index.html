@@ -856,8 +856,21 @@ function switchInnerTab(type, tabName) {
 // =============================================================================
 async function apiGet(type, fresh) {
   // fresh = skip the server's 5-minute cache and read the sheet again (Refresh data)
-  var res = await fetch(API_BASE + '?type=' + type + (fresh ? '&fresh=1' : ''));
-  return res.json();
+  // Google sometimes answers with an HTML error page instead of JSON (busy
+  // server / several requests at once). Retry a few times before giving up.
+  var url = API_BASE + '?type=' + type + (fresh ? '&fresh=1' : '');
+  var lastErr;
+  for (var attempt = 1; attempt <= 3; attempt++) {
+    try {
+      var res = await fetch(url);
+      var text = await res.text();
+      return JSON.parse(text);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < 3) await new Promise(function (r) { setTimeout(r, 1500 * attempt); });
+    }
+  }
+  throw lastErr;
 }
 
 async function apiPost(payload) {
@@ -1007,8 +1020,8 @@ function renderBbKpis(leads) {
     if (isClosedStatus(l.status_raw, 'BB')) {
       closedCount++;
       if (l.close_month && getFinancialYearLabel(l.close_month) === BB_REVENUE_FY_LABEL) {
-        var price = parseFloat(l.price);
-        if (!isNaN(price)) fyRevenue += price;
+        var price = bbEffectivePrice_(l);
+        if (price !== null) fyRevenue += price;
       }
     }
   });
@@ -1326,6 +1339,43 @@ function populateFySelect(type, leads) {
   SELECTED_FY[type] = select.value;
 }
 
+// ---------------------------------------------------------------------------
+// BROADBAND revenue rule: use the sheet's Price when it is filled; if Price is
+// blank but Plan Name is filled, take the price of that plan from the other
+// rows of the same sheet (most common Price recorded for that Plan Name).
+// If neither can be found, the closed lead is "pending" (revenue not counted
+// until Price / Plan Name is filled in the sheet).
+// ---------------------------------------------------------------------------
+var BB_PLAN_PRICE_CACHE = { src: null, map: null };
+function bbPlanKey_(name) { return String(name || '').trim().toLowerCase().replace(/\s+/g, ' '); }
+function bbPlanPriceMap_() {
+  var leads = LEADS_BY_TYPE['BB'] || [];
+  if (BB_PLAN_PRICE_CACHE.src === leads && BB_PLAN_PRICE_CACHE.map) return BB_PLAN_PRICE_CACHE.map;
+  var tally = {};
+  leads.forEach(function (l) {
+    var k = bbPlanKey_(l.plan_name), p = parseFloat(l.price);
+    if (!k || isNaN(p) || p <= 0) return;
+    tally[k] = tally[k] || {};
+    tally[k][p] = (tally[k][p] || 0) + 1;
+  });
+  var map = {};
+  Object.keys(tally).forEach(function (k) {
+    var best = null, bestN = 0;
+    Object.keys(tally[k]).forEach(function (p) { if (tally[k][p] > bestN) { bestN = tally[k][p]; best = parseFloat(p); } });
+    map[k] = best;
+  });
+  BB_PLAN_PRICE_CACHE = { src: leads, map: map };
+  return map;
+}
+// returns a number, or null when the price cannot be determined
+function bbEffectivePrice_(l) {
+  var p = parseFloat(l.price);
+  if (!isNaN(p) && p > 0) return p;
+  var k = bbPlanKey_(l.plan_name);
+  if (k) { var m = bbPlanPriceMap_()[k]; if (m !== undefined && m !== null) return m; }
+  return null;
+}
+
 // If a lead was generated before April 2026 AND has a close_month, its
 // "Total Lead" count is attributed to the close_month instead of its
 // actual generation month. If there's no close_month, it stays on its
@@ -1604,7 +1654,10 @@ function computeMonthlyStatsForSheet(type, fyFilter) {
       if (!fyFilter || closeFy === fyFilter) {
         var entry = ensure(l.close_month);
         entry.closed++;
-        if (type === 'BB' || type === 'ILL') {
+        if (type === 'BB') {
+          var bp = bbEffectivePrice_(l);
+          if (bp !== null) entry.revenue += bp; else entry.pending = (entry.pending || 0) + 1;
+        } else if (type === 'ILL') {
           var price = parseFloat(l.price);
           if (!isNaN(price)) entry.revenue += price;
         }
@@ -1669,7 +1722,10 @@ function renderCombinedReport() {
         '<td>' + sheetLabelCell + '</td>' +
         '<td>' + monthName + ' ' + yearLabel + '</td>' +
         '<td class="num"><strong>' + s.gen + '</strong></td>' +
-        '<td class="num"><strong>' + s.closed + '</strong></td>' +
+        '<td class="num">' + ((type === 'BB')
+          ? '<a href="#" style="color:inherit; text-decoration:underline dotted;" title="Click to see these closed leads" onclick="showClosedDetail(\'BB\',\'' + m + '\'); return false;"><strong>' + s.closed + '</strong></a>' +
+            (s.pending ? '<div style="font-size:11px; color:#b45309;">' + s.pending + ' price/plan pending</div>' : '')
+          : '<strong>' + s.closed + '</strong>') + '</td>' +
         '<td class="num">' + revenueCell + '</td>';
       tbody.appendChild(tr);
     });
@@ -1689,6 +1745,42 @@ function renderCombinedReport() {
   tfoot.appendChild(footTr);
 }
 
+
+
+// Click on a "Lead Close" number in the Combined report -> list of the exact
+// leads behind that number (counted by CLOSE month, incl. older leads),
+// with User Id, so the report can be matched against the sheet.
+function showClosedDetail(type, month) {
+  if (type !== 'BB') return;
+  var esc = function (v) { return String(v === null || v === undefined ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
+  var leads = (LEADS_BY_TYPE['BB'] || []).filter(function (l) { return l.close_month === month; });
+  leads.sort(function (a, b) { return String(a.lead_gen_date || '').localeCompare(String(b.lead_gen_date || '')); });
+  var pending = leads.filter(function (l) { return bbEffectivePrice_(l) === null; });
+  var head = ['#', 'User Id', 'Customer', 'Lead Date', 'Sales', 'Team Leader', 'Plan Name', 'Price (sheet)', 'Price used'];
+  function tbl(list) {
+    var rows = list.map(function (l, i) {
+      var eff = bbEffectivePrice_(l);
+      var older = l.lead_gen_month && l.lead_gen_month !== month ? ' <span style="color:#b45309;">(older lead)</span>' : '';
+      var cells = [i + 1, l.user_id, l.customer_name, l.lead_gen_date, (l.sales_names || []).join(' / '),
+                   (l.team_leader_names || []).join(' / '), l.plan_name, l.price, eff === null ? 'PENDING' : eff];
+      return '<tr>' + cells.map(function (c, ci) { return '<td>' + esc(c) + (ci === 3 ? older : '') + '</td>'; }).join('') + '</tr>';
+    }).join('');
+    return '<table><thead><tr>' + head.map(function (x) { return '<th>' + x + '</th>'; }).join('') + '</tr></thead><tbody>' + rows + '</tbody></table>';
+  }
+  var title = (MONTH_NUM_TO_NAME[month.split('-')[1]] || month) + ' ' + month.split('-')[0];
+  var html = '<div class="modal-box" style="max-width:95vw; width:1100px; max-height:85vh; overflow:auto;">' +
+    '<h3>Broadband &mdash; ' + title + ' &mdash; ' + leads.length + ' closed leads</h3>';
+  if (pending.length) {
+    html += '<h4 style="color:#b45309; margin:10px 0 4px;">Price / Plan pending (' + pending.length + ') &mdash; fill in the sheet, revenue will be counted after Refresh</h4>' + tbl(pending);
+  }
+  html += '<h4 style="margin:14px 0 4px;">All closed leads (' + leads.length + ')</h4>' + tbl(leads) +
+    '<div class="modal-actions"><button class="modal-btn-secondary" data-role="close">Close</button></div></div>';
+  var overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = html;
+  document.body.appendChild(overlay);
+  overlay.querySelector('[data-role="close"]').addEventListener('click', function () { document.body.removeChild(overlay); });
+}
 
 // =============================================================================
 // FIELD DEFINITIONS PER SHEET TYPE — drive both "Add New Lead" and
@@ -2323,12 +2415,12 @@ function showDuplicateMobileModal(onContinue) {
 // =============================================================================
 var DL_SHEETS = [
   { type: 'BB', tab: 'Broadband (BB)', cols: [
-    ['Lead Date','lead_gen_date'],['Customer Name','customer_name'],['Mobile No','mobile'],['Pincode','pincode'],
+    ['Report Match','_dl_tag'],['Lead Date','lead_gen_date'],['Customer Name','customer_name'],['Mobile No','mobile'],['Pincode','pincode'],
     ['Address','address'],['Lead Source','lead_source'],['Type of Connection','connection_type'],
     ['Lead Status','status_raw'],['Sales','sales_names'],['Team Leader','team_leader_names'],
     ['Close Month','close_month'],['Agent Remarks','agent_remarks'],['Sales Remarks','sales_remarks'],
     ['Follow Up Date','followup_date_raw'],['LBO / LCO','lbo_lco'],['Zone Code','zone_code'],
-    ['Plan Name','plan_name'],['Price','price'],['ONU','onu'] ] },
+    ['User Id','user_id'],['Plan Name','plan_name'],['Price','price'],['Price Used In Report','_eff_price'],['Price/Plan Pending','_pending'],['ONU','onu'] ] },
   { type: 'CATV', tab: 'CATV', cols: [
     ['Lead Date','lead_gen_date'],['Customer Name','customer_name'],['Mobile No','mobile'],['Pincode','pincode'],
     ['Address','address'],['Lead Source','lead_source'],['Type of Connection','connection_type'],
@@ -2377,15 +2469,44 @@ function populateDownloadMonths_() {
 function dlLeadsFor_(type) {
   var month = document.getElementById('dl-month').value;
   var leads = LEADS_BY_TYPE[type] || [];
-  if (month === '__all__') return leads;
-  return leads.filter(function (l) { return l.lead_gen_month === month; });
+  if (type !== 'BB') {
+    // CATV / ILL: unchanged — by lead generation month only.
+    if (month === '__all__') return leads;
+    return leads.filter(function (l) { return l.lead_gen_month === month; });
+  }
+  // Broadband only: same rule as the Combined report. A lead belongs to the
+  // month it was generated in AND the month it was closed in, so older leads
+  // closed in the selected month are included and tagged.
+  var out = [];
+  leads.forEach(function (l) {
+    l._eff_price = bbEffectivePrice_(l);
+    l._pending = (l.close_month && l._eff_price === null) ? 'PENDING' : '';
+    if (l._eff_price === null) l._eff_price = '';
+    if (month === '__all__') { l._dl_tag = ''; out.push(l); return; }
+    var genHere = l.lead_gen_month === month;
+    var closedHere = l.close_month === month;
+    if (!genHere && !closedHere) return;
+    l._dl_tag = genHere && closedHere ? 'Generated + Closed this month'
+              : closedHere ? 'Closed this month (older lead)'
+              : 'Generated this month';
+    out.push(l);
+  });
+  return out;
+}
+
+function dlClosedCount_(type) {
+  var month = document.getElementById('dl-month').value;
+  return (LEADS_BY_TYPE[type] || []).filter(function (l) {
+    return l.close_month && (month === '__all__' || l.close_month === month);
+  }).length;
 }
 
 function updateDownloadInfo_() {
   var el = document.getElementById('dl-info');
   if (!el) return;
   var parts = DL_SHEETS.map(function (d) {
-    return d.tab + ': ' + dlLeadsFor_(d.type).length.toLocaleString('en-IN');
+    if (!LOADED_BY_TYPE[d.type]) return d.tab + ': NOT LOADED';
+    return d.tab + ': ' + dlLeadsFor_(d.type).length.toLocaleString('en-IN') + (d.type === 'BB' ? ' (closed: ' + dlClosedCount_(d.type).toLocaleString('en-IN') + ')' : '');
   });
   el.textContent = 'Leads in this selection \u2014 ' + parts.join(' | ');
 }
@@ -2398,6 +2519,13 @@ function dlCell_(v) {
 
 function downloadMonthExcel() {
   if (CURRENT_ROLE !== 'tl') return; // safety: TL only
+  var missing = DL_SHEETS.filter(function (d) { return !LOADED_BY_TYPE[d.type]; })
+    .map(function (d) { return d.tab; });
+  if (missing.length) {
+    alert('These sheets did not load, so the file would be incomplete: ' + missing.join(', ') +
+          '.\n\nClick "Refresh data" and download again once all three load.');
+    return;
+  }
   var wb = XLSX.utils.book_new();
   var added = 0;
   DL_SHEETS.forEach(function (d) {
