@@ -690,6 +690,7 @@
           One row per month per sheet &mdash; Broadband, then CATV, then ILL / Corporate BB. CATV has no
           revenue column in the source sheet, so its Monthly Revenue is left blank.
         </p>
+        <div id="combined-uid-warn"></div>
         <div class="fy-select-row">
           <label for="fy-select-COMBINED">Financial Year</label>
           <select id="fy-select-COMBINED" onchange="renderCombinedReport()"></select>
@@ -1339,6 +1340,11 @@ function populateFySelect(type, leads) {
   SELECTED_FY[type] = select.value;
 }
 
+// Broadband: is the User Id missing? (null / blank). Also tells whether the
+// deployed Apps Script sends the user_id field at all (old versions do not).
+function bbUidBlank_(l) { return l.user_id === null || l.user_id === undefined || String(l.user_id).trim() === ''; }
+function bbUidSupported_() { return (LEADS_BY_TYPE['BB'] || []).some(function (l) { return 'user_id' in l; }); }
+
 // ---------------------------------------------------------------------------
 // BROADBAND revenue rule: use the sheet's Price when it is filled; if Price is
 // blank but Plan Name is filled, take the price of that plan from the other
@@ -1657,6 +1663,7 @@ function computeMonthlyStatsForSheet(type, fyFilter) {
         if (type === 'BB') {
           var bp = bbEffectivePrice_(l);
           if (bp !== null) entry.revenue += bp; else entry.pending = (entry.pending || 0) + 1;
+          if (bbUidBlank_(l)) entry.noUid = (entry.noUid || 0) + 1;
         } else if (type === 'ILL') {
           var price = parseFloat(l.price);
           if (!isNaN(price)) entry.revenue += price;
@@ -1672,6 +1679,13 @@ function renderCombinedReport() {
   var select = document.getElementById('fy-select-COMBINED');
   var fyFilter = select.value;
 
+  var uidWarn = document.getElementById('combined-uid-warn');
+  if (uidWarn) {
+    uidWarn.innerHTML = (LOADED_BY_TYPE['BB'] && !bbUidSupported_())
+      ? '<div style="background:#fef2f2; border:1px solid #fca5a5; color:#991b1b; padding:8px 12px; border-radius:6px; font-size:13px; margin:8px 0;">' +
+        '<strong>User Id data portal e ashchhe na.</strong> Apps Script er <em>new version deploy</em> hoyni (Deploy &rarr; Manage deployments &rarr; Edit &rarr; New version). Deploy korar por Refresh data dao.</div>'
+      : '';
+  }
   var tbody = document.querySelector('#combined-report-table tbody');
   var tfoot = document.querySelector('#combined-report-table tfoot');
   tbody.innerHTML = '';
@@ -1724,7 +1738,8 @@ function renderCombinedReport() {
         '<td class="num"><strong>' + s.gen + '</strong></td>' +
         '<td class="num">' + ((type === 'BB')
           ? '<a href="#" style="color:inherit; text-decoration:underline dotted;" title="Click to see these closed leads" onclick="showClosedDetail(\'BB\',\'' + m + '\'); return false;"><strong>' + s.closed + '</strong></a>' +
-            (s.pending ? '<div style="font-size:11px; color:#b45309;">' + s.pending + ' price/plan pending</div>' : '')
+            (s.pending ? '<div style="font-size:11px; color:#b45309;">' + s.pending + ' price/plan pending</div>' : '') +
+            (s.noUid && bbUidSupported_() ? '<div style="font-size:11px; color:#b91c1c;">' + s.noUid + ' User Id missing</div>' : '')
           : '<strong>' + s.closed + '</strong>') + '</td>' +
         '<td class="num">' + revenueCell + '</td>';
       tbody.appendChild(tr);
@@ -1756,12 +1771,13 @@ function showClosedDetail(type, month) {
   var leads = (LEADS_BY_TYPE['BB'] || []).filter(function (l) { return l.close_month === month; });
   leads.sort(function (a, b) { return String(a.lead_gen_date || '').localeCompare(String(b.lead_gen_date || '')); });
   var pending = leads.filter(function (l) { return bbEffectivePrice_(l) === null; });
+  var noUid = leads.filter(bbUidBlank_);
   var head = ['#', 'User Id', 'Customer', 'Lead Date', 'Sales', 'Team Leader', 'Plan Name', 'Price (sheet)', 'Price used'];
   function tbl(list) {
     var rows = list.map(function (l, i) {
       var eff = bbEffectivePrice_(l);
       var older = l.lead_gen_month && l.lead_gen_month !== month ? ' <span style="color:#b45309;">(older lead)</span>' : '';
-      var cells = [i + 1, l.user_id, l.customer_name, l.lead_gen_date, (l.sales_names || []).join(' / '),
+      var cells = [i + 1, bbUidBlank_(l) ? 'MISSING' : l.user_id, l.customer_name, l.lead_gen_date, (l.sales_names || []).join(' / '),
                    (l.team_leader_names || []).join(' / '), l.plan_name, l.price, eff === null ? 'PENDING' : eff];
       return '<tr>' + cells.map(function (c, ci) { return '<td>' + esc(c) + (ci === 3 ? older : '') + '</td>'; }).join('') + '</tr>';
     }).join('');
@@ -1770,6 +1786,9 @@ function showClosedDetail(type, month) {
   var title = (MONTH_NUM_TO_NAME[month.split('-')[1]] || month) + ' ' + month.split('-')[0];
   var html = '<div class="modal-box" style="max-width:95vw; width:1100px; max-height:85vh; overflow:auto;">' +
     '<h3>Broadband &mdash; ' + title + ' &mdash; ' + leads.length + ' closed leads</h3>';
+  if (noUid.length && bbUidSupported_()) {
+    html += '<h4 style="color:#b91c1c; margin:10px 0 4px;">User Id missing (' + noUid.length + ') &mdash; fill User Id in the sheet</h4>' + tbl(noUid);
+  }
   if (pending.length) {
     html += '<h4 style="color:#b45309; margin:10px 0 4px;">Price / Plan pending (' + pending.length + ') &mdash; fill in the sheet, revenue will be counted after Refresh</h4>' + tbl(pending);
   }
@@ -2420,7 +2439,7 @@ var DL_SHEETS = [
     ['Lead Status','status_raw'],['Sales','sales_names'],['Team Leader','team_leader_names'],
     ['Close Month','close_month'],['Agent Remarks','agent_remarks'],['Sales Remarks','sales_remarks'],
     ['Follow Up Date','followup_date_raw'],['LBO / LCO','lbo_lco'],['Zone Code','zone_code'],
-    ['User Id','user_id'],['Plan Name','plan_name'],['Price','price'],['Price Used In Report','_eff_price'],['Price/Plan Pending','_pending'],['ONU','onu'] ] },
+    ['User Id','user_id'],['User Id Missing (closed)','_uid_missing'],['Plan Name','plan_name'],['Price','price'],['Price Used In Report','_eff_price'],['Price/Plan Pending','_pending'],['ONU','onu'] ] },
   { type: 'CATV', tab: 'CATV', cols: [
     ['Lead Date','lead_gen_date'],['Customer Name','customer_name'],['Mobile No','mobile'],['Pincode','pincode'],
     ['Address','address'],['Lead Source','lead_source'],['Type of Connection','connection_type'],
@@ -2481,6 +2500,7 @@ function dlLeadsFor_(type) {
   leads.forEach(function (l) {
     l._eff_price = bbEffectivePrice_(l);
     l._pending = (l.close_month && l._eff_price === null) ? 'PENDING' : '';
+    l._uid_missing = (l.close_month && bbUidBlank_(l)) ? 'MISSING' : '';
     if (l._eff_price === null) l._eff_price = '';
     if (month === '__all__') { l._dl_tag = ''; out.push(l); return; }
     var genHere = l.lead_gen_month === month;
