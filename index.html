@@ -687,8 +687,10 @@
       <div class="panel">
         <h2>Combined report</h2>
         <p class="note">
-          One row per month per sheet &mdash; Broadband, then CATV, then ILL / Corporate BB. CATV has no
-          revenue column in the source sheet, so its Monthly Revenue is left blank.
+          One row per month per sheet &mdash; Broadband, BB Operator Lead, CATV, CATV Operator Lead, then ILL / Corporate BB.
+          Operator leads (Type of Connection = BB Operator Lead / CATV Operator Lead) are counted in their own rows and
+          are NOT included in the Broadband or CATV rows. CATV has no revenue column in the source sheet, so its
+          Monthly Revenue is left blank.
         </p>
         <div id="combined-uid-warn"></div>
         <div class="fy-select-row">
@@ -995,7 +997,10 @@ async function refreshCurrentSheet() {
 // RENDER: dispatch per sheet type
 // =============================================================================
 function renderSheet(type) {
-  var leads = LEADS_BY_TYPE[type];
+  var allLeads = LEADS_BY_TYPE[type];
+  var leads = allLeads;
+  // BB / CATV: operator leads are shown separately (strip above the KPI cards)
+  if (type === 'BB' || type === 'CATV') leads = splitOperatorLeads_(allLeads).core;
   document.getElementById('kpi-total-' + type).textContent = leads.length.toLocaleString('en-IN');
 
   if (type === 'BB') {
@@ -1014,9 +1019,43 @@ function renderSheet(type) {
     populateFySelect(type, leads);
     renderMonthTable(type);
   } else {
-    populateMonthSelect(type, leads);
+    populateMonthSelect(type, allLeads);
     renderTlSalesByMonth(type);
+    renderOperatorStrip_(type);
   }
+}
+
+// Small strip above the KPI cards of the BB and CATV tabs: all-time operator
+// lead numbers, kept out of the KPI cards and the Sales / TL tables.
+function renderOperatorStrip_(type) {
+  if (type !== 'BB' && type !== 'CATV') return;
+  var ops = splitOperatorLeads_(LEADS_BY_TYPE[type]).ops;
+  var closed = ops.filter(function (l) { return isClosedStatus(l.status_raw, type); });
+  var label = (type === 'BB') ? 'BB Operator Lead' : 'CATV Operator Lead';
+  var html = '<strong style="color:#6d28d9;">' + label + '</strong> ' +
+    '<span style="color:var(--grey);">(counted separately &mdash; not in the cards and tables below)</span> &nbsp;&middot;&nbsp; ' +
+    'Total leads: <strong>' + ops.length.toLocaleString('en-IN') + '</strong> &nbsp;&middot;&nbsp; ' +
+    'Closed: <strong>' + closed.length.toLocaleString('en-IN') + '</strong>';
+  if (type === 'BB') {
+    var rev = 0;
+    closed.forEach(function (l) {
+      if (l.close_month && getFinancialYearLabel(l.close_month) === BB_REVENUE_FY_LABEL) {
+        var p = bbEffectivePrice_(l); if (p !== null) rev += p;
+      }
+    });
+    html += ' &nbsp;&middot;&nbsp; Revenue (' + BB_REVENUE_FY_LABEL + '): <strong>' + fmtINR(rev) + '</strong>';
+  }
+  var panel = document.getElementById('sheet-panel-' + type);
+  var id = 'op-strip-' + type;
+  var el = document.getElementById(id);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = id;
+    el.style.cssText = 'background:#faf5ff; border:1px solid #e9d5ff; border-radius:10px; padding:9px 16px; margin:0 0 12px; font-size:13px;';
+    var kpi = panel.querySelector('.kpi-row');
+    kpi.parentNode.insertBefore(el, kpi);
+  }
+  el.innerHTML = html;
 }
 
 function fmtINR(n) {
@@ -1423,6 +1462,16 @@ function bbEffectivePrice_(l) {
 // real generation month. Leads generated April 2026 or later are
 // unaffected either way.
 var CUTOFF_MONTH_KEY = "2026-04";
+
+// Operator leads (Type of Connection = "BB Operator Lead" / "CATV Operator Lead")
+// are an LBO/LCO enquiry, not a customer connection. They are reported in their
+// own rows and kept out of the normal Broadband / CATV numbers.
+function isOperatorLead_(l) { return /operator lead/i.test(String(l.connection_type || '')); }
+function splitOperatorLeads_(leads) {
+  var core = [], ops = [];
+  (leads || []).forEach(function (l) { (isOperatorLead_(l) ? ops : core).push(l); });
+  return { core: core, ops: ops };
+}
 function getEffectiveGenMonth(lead) {
   if (lead.lead_gen_month && lead.lead_gen_month < CUTOFF_MONTH_KEY && lead.close_month) {
     return lead.close_month;
@@ -1561,7 +1610,9 @@ function renderTlSalesByMonth(type) {
   var selectedMonth = select.value;
   var tlFilterSelect = document.getElementById('tl-filter-' + type);
   var tlFilter = tlFilterSelect ? tlFilterSelect.value : '';
-  var leads = LEADS_BY_TYPE[type] || [];
+  var allLeadsOfType = LEADS_BY_TYPE[type] || [];
+  var opSplit = (type === 'BB' || type === 'CATV') ? splitOperatorLeads_(allLeadsOfType) : { core: allLeadsOfType, ops: [] };
+  var leads = opSplit.core;
   var container = document.getElementById('tl-sales-by-month-' + type);
 
   leads.forEach(function (l) { l._type = type; }); // tag for isClosedStatus inside dedupeLeadsByMobile
@@ -1584,8 +1635,23 @@ function renderTlSalesByMonth(type) {
     closedLeads = closedLeads.filter(function (l) { return (l.team_leader_names || []).indexOf(tlFilter) !== -1; });
   }
 
+  // Operator leads for the same month / TL filter — shown in their own box on top
+  var opHtml = '';
+  if ((type === 'BB' || type === 'CATV') && selectedMonth) {
+    var opTotal = opSplit.ops.filter(function (l) { return getEffectiveGenMonth(l) === selectedMonth; });
+    var opClosed = opSplit.ops.filter(function (l) { return l.close_month === selectedMonth; });
+    if (tlFilter) {
+      opTotal = opTotal.filter(function (l) { return (l.team_leader_names || []).indexOf(tlFilter) !== -1; });
+      opClosed = opClosed.filter(function (l) { return (l.team_leader_names || []).indexOf(tlFilter) !== -1; });
+    }
+    opHtml = '<div style="border:1px dashed #c4b5fd; border-radius:10px; margin-bottom:14px; padding:10px 16px; font-size:13px; background:#faf5ff;">' +
+      '<strong style="color:#6d28d9;">' + (type === 'BB' ? 'BB Operator Lead' : 'CATV Operator Lead') + '</strong> ' +
+      '<span style="color:var(--grey);">(counted separately &mdash; not in the Team Leader / Sales numbers below)</span> &nbsp;&middot;&nbsp; ' +
+      'Total leads: <strong>' + opTotal.length + '</strong> &nbsp;&middot;&nbsp; Closed: <strong>' + opClosed.length + '</strong></div>';
+  }
+
   if (!selectedMonth || (totalLeads.length === 0 && closedLeads.length === 0)) {
-    container.innerHTML = '<p class="empty-note">No data for this month</p>';
+    container.innerHTML = opHtml + '<p class="empty-note">No data for this month</p>';
     return;
   }
 
@@ -1643,7 +1709,7 @@ function renderTlSalesByMonth(type) {
     html += '</div>';
   });
 
-  container.innerHTML = html;
+  container.innerHTML = opHtml + html;
 }
 
 
@@ -1673,8 +1739,10 @@ function populateCombinedFySelect() {
 
 // Computes { month -> { genCount, closeCount, revenue } } for one sheet
 // type, within the given FY filter (or all months if fyFilter is empty).
-function computeMonthlyStatsForSheet(type, fyFilter) {
+function computeMonthlyStatsForSheet(type, fyFilter, opMode) {
   var leads = LEADS_BY_TYPE[type] || [];
+  if (opMode === 'only') leads = leads.filter(isOperatorLead_);
+  else if (opMode === 'exclude') leads = leads.filter(function (l) { return !isOperatorLead_(l); });
   var stats = {}; // month key -> { gen, closed, revenue }
 
   function ensure(m) {
@@ -1726,18 +1794,29 @@ function renderCombinedReport() {
   tbody.innerHTML = '';
   tfoot.innerHTML = '';
 
-  var sheetLabels = { BB: 'Broadband (BB)', CATV: 'CATV', ILL: 'ILL / Corporate BB' };
+  // Rows of the report. Operator leads get their own rows (BBOP / CATVOP) and
+  // are excluded from the BB / CATV rows.
+  var COMBINED_ROWS = [
+    { key: 'BB', type: 'BB', op: 'exclude', label: 'Broadband (BB)' },
+    { key: 'BBOP', type: 'BB', op: 'only', label: 'BB Operator Lead' },
+    { key: 'CATV', type: 'CATV', op: 'exclude', label: 'CATV' },
+    { key: 'CATVOP', type: 'CATV', op: 'only', label: 'CATV Operator Lead' },
+    { key: 'ILL', type: 'ILL', op: '', label: 'ILL / Corporate BB' }
+  ];
   var sheetColors = {
     BB: { bg: '#eaf0fb', text: 'var(--blue)' },
+    BBOP: { bg: '#f1eafd', text: '#6d28d9' },
     CATV: { bg: '#e2f3e9', text: 'var(--teal)' },
+    CATVOP: { bg: '#fdebf3', text: '#be185d' },
     ILL: { bg: '#fdf3e3', text: 'var(--amber)' }
   };
-  var sheetRowTints = { BB: '#f7fafd', CATV: '#f4faf7', ILL: '#fefaf3' };
+  var sheetRowTints = { BB: '#f7fafd', BBOP: '#faf7fe', CATV: '#f4faf7', CATVOP: '#fdf6f9', ILL: '#fefaf3' };
   var grandTotalLead = 0, grandTotalClose = 0, grandTotalRevenue = 0;
   var anyRows = false;
 
-  SHEET_TYPES.forEach(function (type) {
-    var stats = computeMonthlyStatsForSheet(type, fyFilter);
+  COMBINED_ROWS.forEach(function (row) {
+    var type = row.type;
+    var stats = computeMonthlyStatsForSheet(type, fyFilter, row.op);
     var months = Array.from(new Set(Object.keys(stats)));
     months.sort(function (a, b) {
       var fa = fyMonthKey(a), fb = fyMonthKey(b);
@@ -1747,21 +1826,22 @@ function renderCombinedReport() {
 
     if (months.length === 0) return;
     anyRows = true;
-    var color = sheetColors[type];
-    var rowTint = sheetRowTints[type];
+    var color = sheetColors[row.key];
+    var rowTint = sheetRowTints[row.key];
 
     months.forEach(function (m, idx) {
       var monthName = MONTH_NUM_TO_NAME[m.split('-')[1]] || m;
       var yearLabel = m.split('-')[0];
       var s = stats[m];
-      var revenueCell = (type === 'CATV') ? '&mdash;' : ('<strong style="color:var(--teal);">' + fmtINR(s.revenue) + '</strong>');
+      var revenueCell = (type === 'CATV' || (row.key === 'BBOP' && !s.revenue))
+        ? '&mdash;' : ('<strong style="color:var(--teal);">' + fmtINR(s.revenue) + '</strong>');
 
       grandTotalLead += s.gen;
       grandTotalClose += s.closed;
       if (type !== 'CATV') grandTotalRevenue += s.revenue;
 
       var sheetLabelCell = (idx === 0)
-        ? '<span style="display:inline-block; background:' + color.bg + '; color:' + color.text + '; font-weight:700; padding:3px 12px; border-radius:12px; font-size:12px;">' + sheetLabels[type] + '</span>'
+        ? '<span style="display:inline-block; background:' + color.bg + '; color:' + color.text + '; font-weight:700; padding:3px 12px; border-radius:12px; font-size:12px;">' + row.label + '</span>'
         : '';
 
       var tr = document.createElement('tr');
@@ -1772,7 +1852,7 @@ function renderCombinedReport() {
         '<td>' + monthName + ' ' + yearLabel + '</td>' +
         '<td class="num"><strong>' + s.gen + '</strong></td>' +
         '<td class="num">' + ((type === 'BB')
-          ? '<a href="#" style="color:inherit; text-decoration:underline dotted;" title="Click to see these closed leads" onclick="showClosedDetail(\'BB\',\'' + m + '\'); return false;"><strong>' + s.closed + '</strong></a>' +
+          ? '<a href="#" style="color:inherit; text-decoration:underline dotted;" title="Click to see these closed leads" onclick="showClosedDetail(\'BB\',\'' + m + '\',\'' + row.op + '\'); return false;"><strong>' + s.closed + '</strong></a>' +
             (s.pending ? '<div style="font-size:11px; color:#b45309;">' + s.pending + ' price/plan pending</div>' : '') +
             (s.noUid && bbUidSupported_() ? '<div style="font-size:11px; color:#b91c1c;">' + s.noUid + ' User Id missing</div>' : '')
           : '<strong>' + s.closed + '</strong>') + '</td>' +
@@ -1800,10 +1880,15 @@ function renderCombinedReport() {
 // Click on a "Lead Close" number in the Combined report -> list of the exact
 // leads behind that number (counted by CLOSE month, incl. older leads),
 // with User Id, so the report can be matched against the sheet.
-function showClosedDetail(type, month) {
+function showClosedDetail(type, month, opMode) {
   if (type !== 'BB') return;
   var esc = function (v) { return String(v === null || v === undefined ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
-  var leads = (LEADS_BY_TYPE['BB'] || []).filter(function (l) { return l.close_month === month; });
+  var leads = (LEADS_BY_TYPE['BB'] || []).filter(function (l) {
+    if (l.close_month !== month) return false;
+    if (opMode === 'only') return isOperatorLead_(l);
+    if (opMode === 'exclude') return !isOperatorLead_(l);
+    return true;
+  });
   leads.sort(function (a, b) { return String(a.lead_gen_date || '').localeCompare(String(b.lead_gen_date || '')); });
   var pending = leads.filter(function (l) { return bbEffectivePrice_(l) === null; });
   var noUid = leads.filter(bbUidBlank_);
@@ -1820,7 +1905,7 @@ function showClosedDetail(type, month) {
   }
   var title = (MONTH_NUM_TO_NAME[month.split('-')[1]] || month) + ' ' + month.split('-')[0];
   var html = '<div class="modal-box" style="max-width:95vw; width:1100px; max-height:85vh; overflow:auto;">' +
-    '<h3>Broadband &mdash; ' + title + ' &mdash; ' + leads.length + ' closed leads</h3>';
+    '<h3>' + (opMode === 'only' ? 'BB Operator Lead' : 'Broadband') + ' &mdash; ' + title + ' &mdash; ' + leads.length + ' closed leads</h3>';
   if (noUid.length && bbUidSupported_()) {
     html += '<h4 style="color:#b91c1c; margin:10px 0 4px;">User Id missing (' + noUid.length + ') &mdash; fill User Id in the sheet</h4>' + tbl(noUid);
   }
@@ -2469,14 +2554,14 @@ function showDuplicateMobileModal(onContinue) {
 // =============================================================================
 var DL_SHEETS = [
   { type: 'BB', tab: 'Broadband (BB)', cols: [
-    ['Report Match','_dl_tag'],['Lead Date','lead_gen_date'],['Customer Name','customer_name'],['Mobile No','mobile'],['Pincode','pincode'],
+    ['Report Row','_dl_row'],['Report Match','_dl_tag'],['Lead Date','lead_gen_date'],['Customer Name','customer_name'],['Mobile No','mobile'],['Pincode','pincode'],
     ['Address','address'],['Lead Source','lead_source'],['Type of Connection','connection_type'],
     ['Lead Status','status_raw'],['Sales','sales_names'],['Team Leader','team_leader_names'],
     ['Close Month','close_month'],['Lead Closer Date (as typed in sheet)','closer_date_raw'],['Agent Remarks','agent_remarks'],['Sales Remarks','sales_remarks'],
     ['Follow Up Date','followup_date_raw'],['LBO / LCO','lbo_lco'],['Zone Code','zone_code'],
     ['User Id','_uid'],['User Id Missing (closed)','_uid_missing'],['Plan Name','plan_name'],['Price','price'],['Price Used In Report','_eff_price'],['Price/Plan Pending','_pending'],['ONU','onu'] ] },
   { type: 'CATV', tab: 'CATV', cols: [
-    ['Lead Date','lead_gen_date'],['Customer Name','customer_name'],['Mobile No','mobile'],['Pincode','pincode'],
+    ['Report Row','_dl_row'],['Lead Date','lead_gen_date'],['Customer Name','customer_name'],['Mobile No','mobile'],['Pincode','pincode'],
     ['Address','address'],['Lead Source','lead_source'],['Type of Connection','connection_type'],
     ['Lead Status','status_raw'],['Sales','sales_names'],['Team Leader','team_leader_names'],
     ['Close Month','close_month'],['Agent Remarks','agent_remarks'] ] },
@@ -2523,6 +2608,11 @@ function populateDownloadMonths_() {
 function dlLeadsFor_(type) {
   var month = document.getElementById('dl-month').value;
   var leads = LEADS_BY_TYPE[type] || [];
+  if (type === 'BB' || type === 'CATV') {
+    leads.forEach(function (l) {
+      l._dl_row = isOperatorLead_(l) ? (type === 'BB' ? 'BB Operator Lead' : 'CATV Operator Lead') : (type === 'BB' ? 'Broadband (BB)' : 'CATV');
+    });
+  }
   if (type !== 'BB') {
     // CATV / ILL: unchanged — by lead generation month only.
     if (month === '__all__') return leads;
