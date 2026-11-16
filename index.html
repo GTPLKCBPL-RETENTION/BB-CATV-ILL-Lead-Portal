@@ -687,9 +687,9 @@
       <div class="panel">
         <h2>Combined report</h2>
         <p class="note">
-          One row per month per sheet &mdash; Broadband, BB Operator Lead, CATV, CATV Operator Lead, then ILL / Corporate BB.
-          Operator leads (Type of Connection = BB Operator Lead / CATV Operator Lead) are counted in their own rows and
-          are NOT included in the Broadband or CATV rows. CATV has no revenue column in the source sheet, so its
+          One row per month per sheet &mdash; Broadband, BB Operator Lead, CATV, CATV Operator Lead, BB &amp; CATV Combo, then ILL / Corporate BB.
+          Operator leads (Type of Connection = BB Operator Lead / CATV Operator Lead) and Combo leads (Type of Connection = BB&amp;CATV COMBO,
+          from the BB and CATV sheets together) are counted in their own rows and are NOT included in the Broadband or CATV rows. CATV has no revenue column in the source sheet, so its
           Monthly Revenue is left blank.
         </p>
         <div id="combined-uid-warn"></div>
@@ -1022,7 +1022,39 @@ function renderSheet(type) {
     populateMonthSelect(type, allLeads);
     renderTlSalesByMonth(type);
     renderOperatorStrip_(type);
+    renderComboStrip_(type);
   }
+}
+
+// Strip (BB and CATV tabs) for BB&CATV COMBO leads: all-time numbers, kept out of the cards and tables.
+function renderComboStrip_(type) {
+  if (type !== 'BB' && type !== 'CATV') return;
+  var combo = splitOperatorLeads_(LEADS_BY_TYPE[type]).combo;
+  var closed = combo.filter(function (l) { return isClosedStatus(l.status_raw, type); });
+  var html = '<strong style="color:#0e7490;">BB &amp; CATV Combo</strong> ' +
+    '<span style="color:var(--grey);">(counted separately &mdash; not in the cards and tables below)</span> &nbsp;&middot;&nbsp; ' +
+    'Total leads: <strong>' + combo.length.toLocaleString('en-IN') + '</strong> &nbsp;&middot;&nbsp; ' +
+    'Closed: <strong>' + closed.length.toLocaleString('en-IN') + '</strong>';
+  if (type === 'BB') {
+    var rev = 0;
+    closed.forEach(function (l) {
+      if (l.close_month && getFinancialYearLabel(l.close_month) === BB_REVENUE_FY_LABEL) {
+        var p = bbEffectivePrice_(l); if (p !== null) rev += p;
+      }
+    });
+    html += ' &nbsp;&middot;&nbsp; Revenue (' + BB_REVENUE_FY_LABEL + '): <strong>' + fmtINR(rev) + '</strong>';
+  }
+  var panel = document.getElementById('sheet-panel-' + type);
+  var id = 'combo-strip-' + type;
+  var el = document.getElementById(id);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = id;
+    el.style.cssText = 'background:#ecfeff; border:1px solid #a5f3fc; border-radius:10px; padding:9px 16px; margin:0 0 12px; font-size:13px;';
+    var kpi = panel.querySelector('.kpi-row');
+    kpi.parentNode.insertBefore(el, kpi);
+  }
+  el.innerHTML = html;
 }
 
 // Small strip above the KPI cards of the BB and CATV tabs: all-time operator
@@ -1467,10 +1499,17 @@ var CUTOFF_MONTH_KEY = "2026-04";
 // are an LBO/LCO enquiry, not a customer connection. They are reported in their
 // own rows and kept out of the normal Broadband / CATV numbers.
 function isOperatorLead_(l) { return /operator lead/i.test(String(l.connection_type || '')); }
+// BB&CATV COMBO (Type of Connection = "BB&CATV COMBO") is also reported on its own
+// and kept out of the normal Broadband / CATV numbers.
+function isComboLead_(l) { return /bb\s*(&|and)?\s*catv\s*combo/i.test(String(l.connection_type || '')); }
 function splitOperatorLeads_(leads) {
-  var core = [], ops = [];
-  (leads || []).forEach(function (l) { (isOperatorLead_(l) ? ops : core).push(l); });
-  return { core: core, ops: ops };
+  var core = [], ops = [], combo = [];
+  (leads || []).forEach(function (l) {
+    if (isComboLead_(l)) combo.push(l);
+    else if (isOperatorLead_(l)) ops.push(l);
+    else core.push(l);
+  });
+  return { core: core, ops: ops, combo: combo };
 }
 function getEffectiveGenMonth(lead) {
   if (lead.lead_gen_month && lead.lead_gen_month < CUTOFF_MONTH_KEY && lead.close_month) {
@@ -1648,6 +1687,16 @@ function renderTlSalesByMonth(type) {
       '<strong style="color:#6d28d9;">' + (type === 'BB' ? 'BB Operator Lead' : 'CATV Operator Lead') + '</strong> ' +
       '<span style="color:var(--grey);">(counted separately &mdash; not in the Team Leader / Sales numbers below)</span> &nbsp;&middot;&nbsp; ' +
       'Total leads: <strong>' + opTotal.length + '</strong> &nbsp;&middot;&nbsp; Closed: <strong>' + opClosed.length + '</strong></div>';
+    var cbTotal = opSplit.combo.filter(function (l) { return getEffectiveGenMonth(l) === selectedMonth; });
+    var cbClosed = opSplit.combo.filter(function (l) { return l.close_month === selectedMonth; });
+    if (tlFilter) {
+      cbTotal = cbTotal.filter(function (l) { return (l.team_leader_names || []).indexOf(tlFilter) !== -1; });
+      cbClosed = cbClosed.filter(function (l) { return (l.team_leader_names || []).indexOf(tlFilter) !== -1; });
+    }
+    opHtml += '<div style="border:1px dashed #67e8f9; border-radius:10px; margin-bottom:14px; padding:10px 16px; font-size:13px; background:#ecfeff;">' +
+      '<strong style="color:#0e7490;">BB &amp; CATV Combo</strong> ' +
+      '<span style="color:var(--grey);">(counted separately &mdash; not in the Team Leader / Sales numbers below)</span> &nbsp;&middot;&nbsp; ' +
+      'Total leads: <strong>' + cbTotal.length + '</strong> &nbsp;&middot;&nbsp; Closed: <strong>' + cbClosed.length + '</strong></div>';
   }
 
   if (!selectedMonth || (totalLeads.length === 0 && closedLeads.length === 0)) {
@@ -1741,8 +1790,9 @@ function populateCombinedFySelect() {
 // type, within the given FY filter (or all months if fyFilter is empty).
 function computeMonthlyStatsForSheet(type, fyFilter, opMode) {
   var leads = LEADS_BY_TYPE[type] || [];
-  if (opMode === 'only') leads = leads.filter(isOperatorLead_);
-  else if (opMode === 'exclude') leads = leads.filter(function (l) { return !isOperatorLead_(l); });
+  if (opMode === 'only') leads = leads.filter(function (l) { return isOperatorLead_(l) && !isComboLead_(l); });
+  else if (opMode === 'combo') leads = leads.filter(isComboLead_);
+  else if (opMode === 'exclude') leads = leads.filter(function (l) { return !isOperatorLead_(l) && !isComboLead_(l); });
   var stats = {}; // month key -> { gen, closed, revenue }
 
   function ensure(m) {
@@ -1801,6 +1851,7 @@ function renderCombinedReport() {
     { key: 'BBOP', type: 'BB', op: 'only', label: 'BB Operator Lead' },
     { key: 'CATV', type: 'CATV', op: 'exclude', label: 'CATV' },
     { key: 'CATVOP', type: 'CATV', op: 'only', label: 'CATV Operator Lead' },
+    { key: 'COMBO', type: 'BB', also: 'CATV', op: 'combo', label: 'BB & CATV Combo' },
     { key: 'ILL', type: 'ILL', op: '', label: 'ILL / Corporate BB' }
   ];
   var sheetColors = {
@@ -1808,15 +1859,23 @@ function renderCombinedReport() {
     BBOP: { bg: '#f1eafd', text: '#6d28d9' },
     CATV: { bg: '#e2f3e9', text: 'var(--teal)' },
     CATVOP: { bg: '#fdebf3', text: '#be185d' },
+    COMBO: { bg: '#e0f7fa', text: '#0e7490' },
     ILL: { bg: '#fdf3e3', text: 'var(--amber)' }
   };
-  var sheetRowTints = { BB: '#f7fafd', BBOP: '#faf7fe', CATV: '#f4faf7', CATVOP: '#fdf6f9', ILL: '#fefaf3' };
+  var sheetRowTints = { BB: '#f7fafd', BBOP: '#faf7fe', CATV: '#f4faf7', CATVOP: '#fdf6f9', COMBO: '#f3fcfd', ILL: '#fefaf3' };
   var grandTotalLead = 0, grandTotalClose = 0, grandTotalRevenue = 0;
   var anyRows = false;
 
   COMBINED_ROWS.forEach(function (row) {
     var type = row.type;
     var stats = computeMonthlyStatsForSheet(type, fyFilter, row.op);
+    if (row.also) {   // combo: BB-sheet + CATV-sheet combo leads shown together in one row
+      var st2 = computeMonthlyStatsForSheet(row.also, fyFilter, row.op);
+      Object.keys(st2).forEach(function (mk) {
+        var a = stats[mk] = stats[mk] || { gen: 0, closed: 0, revenue: 0 };
+        a.gen += st2[mk].gen; a.closed += st2[mk].closed; a.revenue += st2[mk].revenue;
+      });
+    }
     var months = Array.from(new Set(Object.keys(stats)));
     months.sort(function (a, b) {
       var fa = fyMonthKey(a), fb = fyMonthKey(b);
@@ -1833,7 +1892,7 @@ function renderCombinedReport() {
       var monthName = MONTH_NUM_TO_NAME[m.split('-')[1]] || m;
       var yearLabel = m.split('-')[0];
       var s = stats[m];
-      var revenueCell = (type === 'CATV' || (row.key === 'BBOP' && !s.revenue))
+      var revenueCell = (type === 'CATV' || ((row.key === 'BBOP' || row.key === 'COMBO') && !s.revenue))
         ? '&mdash;' : ('<strong style="color:var(--teal);">' + fmtINR(s.revenue) + '</strong>');
 
       grandTotalLead += s.gen;
@@ -1851,7 +1910,7 @@ function renderCombinedReport() {
         '<td>' + sheetLabelCell + '</td>' +
         '<td>' + monthName + ' ' + yearLabel + '</td>' +
         '<td class="num"><strong>' + s.gen + '</strong></td>' +
-        '<td class="num">' + ((type === 'BB')
+        '<td class="num">' + ((type === 'BB' && row.key !== 'COMBO')
           ? '<a href="#" style="color:inherit; text-decoration:underline dotted;" title="Click to see these closed leads" onclick="showClosedDetail(\'BB\',\'' + m + '\',\'' + row.op + '\'); return false;"><strong>' + s.closed + '</strong></a>' +
             (s.pending ? '<div style="font-size:11px; color:#b45309;">' + s.pending + ' price/plan pending</div>' : '') +
             (s.noUid && bbUidSupported_() ? '<div style="font-size:11px; color:#b91c1c;">' + s.noUid + ' User Id missing</div>' : '')
@@ -1885,8 +1944,9 @@ function showClosedDetail(type, month, opMode) {
   var esc = function (v) { return String(v === null || v === undefined ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
   var leads = (LEADS_BY_TYPE['BB'] || []).filter(function (l) {
     if (l.close_month !== month) return false;
-    if (opMode === 'only') return isOperatorLead_(l);
-    if (opMode === 'exclude') return !isOperatorLead_(l);
+    if (opMode === 'only') return isOperatorLead_(l) && !isComboLead_(l);
+    if (opMode === 'combo') return isComboLead_(l);
+    if (opMode === 'exclude') return !isOperatorLead_(l) && !isComboLead_(l);
     return true;
   });
   leads.sort(function (a, b) { return String(a.lead_gen_date || '').localeCompare(String(b.lead_gen_date || '')); });
@@ -1905,7 +1965,7 @@ function showClosedDetail(type, month, opMode) {
   }
   var title = (MONTH_NUM_TO_NAME[month.split('-')[1]] || month) + ' ' + month.split('-')[0];
   var html = '<div class="modal-box" style="max-width:95vw; width:1100px; max-height:85vh; overflow:auto;">' +
-    '<h3>' + (opMode === 'only' ? 'BB Operator Lead' : 'Broadband') + ' &mdash; ' + title + ' &mdash; ' + leads.length + ' closed leads</h3>';
+    '<h3>' + (opMode === 'only' ? 'BB Operator Lead' : (opMode === 'combo' ? 'BB & CATV Combo' : 'Broadband')) + ' &mdash; ' + title + ' &mdash; ' + leads.length + ' closed leads</h3>';
   if (noUid.length && bbUidSupported_()) {
     html += '<h4 style="color:#b91c1c; margin:10px 0 4px;">User Id missing (' + noUid.length + ') &mdash; fill User Id in the sheet</h4>' + tbl(noUid);
   }
@@ -1943,7 +2003,7 @@ var FIELD_DEFS = {
     { label: "Lead Source", header: "LEAD SOURCE", type: "select", required: true,
       options: ["BB campaign lead", "Call Center Lead", "GTPL KCBPL Inquiry Lead", "GTPLKCBPL website lead"] },
     { label: "Type of Connection", header: "TYPE OF CONNECTION", type: "select", required: true,
-      options: ["BB Operator Lead", "Broadband Connection", "CATV Connection", "Cable Connection", "ILL/CBB Lead"] },
+      options: ["BB Operator Lead", "Broadband Connection", "CATV Connection", "Cable Connection", "BB&CATV COMBO", "ILL/CBB Lead"] },
     { label: "Followup Date", header: "FOLLOWUP DATE (mm/dd/yyyy)", type: "date", skipOnAdd: true },
     { label: "Agent Remarks", header: "AGENT REMARKS", type: "textarea" },
     { label: "Sales Remarks", header: "SALES REMARKS", type: "textarea", skipOnAdd: true },
@@ -1970,7 +2030,7 @@ var FIELD_DEFS = {
     { label: "Lead Source", header: "LEAD SOURCE", type: "select", required: true,
       options: ["Call Center Lead", "GTPL KCBPL Inquiry Lead", "GTPLKCBPL website lead"] },
     { label: "Type of Connection", header: "TYPE OF CONNECTION", type: "select", required: true,
-      options: ["CATV Operator Lead", "Cable Connection"], defaultValue: "CATV Operator Lead" },
+      options: ["CATV Operator Lead", "Cable Connection", "BB&CATV COMBO"], defaultValue: "CATV Operator Lead" },
     { label: "Agent Remarks", header: "AGENT REMARKS", type: "textarea" },
     { label: "Sales", header: "SALES", type: "select", options: [], skipOnAdd: true },
     { label: "Team Leader", header: "TEAM LEADER", type: "select", options: [], skipOnAdd: true }
@@ -2610,7 +2670,7 @@ function dlLeadsFor_(type) {
   var leads = LEADS_BY_TYPE[type] || [];
   if (type === 'BB' || type === 'CATV') {
     leads.forEach(function (l) {
-      l._dl_row = isOperatorLead_(l) ? (type === 'BB' ? 'BB Operator Lead' : 'CATV Operator Lead') : (type === 'BB' ? 'Broadband (BB)' : 'CATV');
+      l._dl_row = isComboLead_(l) ? 'BB & CATV Combo' : (isOperatorLead_(l) ? (type === 'BB' ? 'BB Operator Lead' : 'CATV Operator Lead') : (type === 'BB' ? 'Broadband (BB)' : 'CATV'));
     });
   }
   if (type !== 'BB') {
